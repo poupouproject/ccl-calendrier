@@ -1,0 +1,54 @@
+/* ── Tokens ── */
+:root {
+  --orange:       #FF5C1A;
+  --orange-light: #FF7A40;
+  --yellow:       #FFD000;
+  --green:        #00C853;
+  --red:          #FF3B30;
+  --blue:         #40A0FF;
+  --dark:         #0D1117;
+  --dark-2:       #161C26;
+  --dark-3:       #1E2636;
+  --card-bg:      #1A2132;
+  --text:         #EDF0F5;
+  --text-muted:   #8A95A8;
+  --border:       rgba(255, 255, 255, 0.07);
+}
+
+/* ── Reset ── */
+*,
+*::before,
+*::after {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+html {
+  -webkit-text-size-adjust: 100%;
+  scroll-behavior: smooth;
+}
+
+body {
+  font-family: 'Barlow', sans-serif;
+  background: var(--dark);
+  color: var(--text);
+  min-height: 100vh;
+  overflow-x: hidden;
+  line-height: 1.5;
+}
+
+img,
+svg {
+  display: block;
+  max-width: 100%;
+}
+
+button,
+input {
+  font-family: inherit;
+}
+
+a {
+  color: inherit;
+}

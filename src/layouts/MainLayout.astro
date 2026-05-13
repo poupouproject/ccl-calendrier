@@ -1,0 +1,123 @@
+---
+import '../styles/global.css';
+import { siteConfig } from '@/config/siteConfig';
+
+interface Props {
+  title: string;
+  description?: string;
+  canonicalUrl?: string;
+}
+
+const {
+  title,
+  description = siteConfig.description,
+  canonicalUrl,
+} = Astro.props;
+
+const canonical = canonicalUrl ?? new URL(Astro.url.pathname, siteConfig.url).href;
+---
+
+<!doctype html>
+<html lang="fr-CA">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>{title}</title>
+    <meta name="description" content={description} />
+    <link rel="canonical" href={canonical} />
+
+    <!-- Open Graph -->
+    <meta property="og:title" content={title} />
+    <meta property="og:description" content={description} />
+    <meta property="og:url" content={canonical} />
+    <meta property="og:type" content="website" />
+    <meta property="og:locale" content="fr_CA" />
+
+    <!-- Fonts — Barlow Condensed (titres) + Barlow (corps) -->
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@400;600;700;900&family=Barlow:wght@400;500;600&display=swap"
+      rel="stylesheet"
+    />
+
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+  </head>
+  <body>
+    <header class="site-header">
+      <div class="logo">
+        <div class="logo-badge">CCL</div>
+        <div class="logo-title">Montagne <span>Jeunesse</span></div>
+      </div>
+      <div class="header-tag">Sorties &amp; Activités</div>
+    </header>
+
+    <slot />
+  </body>
+</html>
+
+<style>
+  .site-header {
+    background: var(--dark-2);
+    border-bottom: 2px solid var(--orange);
+    padding: 0 2rem;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    height: 64px;
+    position: sticky;
+    top: 0;
+    z-index: 100;
+  }
+
+  .logo {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+
+  .logo-badge {
+    background: var(--orange);
+    color: #fff;
+    font-family: 'Barlow Condensed', sans-serif;
+    font-weight: 900;
+    font-size: 1.1rem;
+    padding: 4px 10px;
+    clip-path: polygon(0 0, 100% 0, 94% 100%, 6% 100%);
+    letter-spacing: 0.04em;
+  }
+
+  .logo-title {
+    font-family: 'Barlow Condensed', sans-serif;
+    font-weight: 700;
+    font-size: 1.15rem;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--text);
+  }
+
+  .logo-title span {
+    color: var(--orange);
+  }
+
+  .header-tag {
+    background: rgba(255, 92, 26, 0.15);
+    border: 1px solid rgba(255, 92, 26, 0.4);
+    color: var(--orange-light);
+    font-size: 0.75rem;
+    font-weight: 600;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    padding: 4px 12px;
+    border-radius: 2px;
+  }
+
+  @media (max-width: 600px) {
+    .site-header {
+      padding: 0 1rem;
+    }
+    .header-tag {
+      display: none;
+    }
+  }
+</style>

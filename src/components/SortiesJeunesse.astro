@@ -1,0 +1,1084 @@
+---
+import type { Sortie, TypeSortie } from '@/utils/parseIcal';
+
+interface Props {
+  sorties: Sortie[];
+  error: string | null;
+  configured: boolean;
+}
+
+const { sorties, error, configured } = Astro.props;
+
+// ── Helpers ────────────────────────────────────────────────────────────────
+
+const now = new Date();
+const ONE_WEEK_MS = 7 * 24 * 60 * 60 * 1000;
+
+function localDate(dateStr: string, isAllDay: boolean): Date {
+  if (isAllDay) {
+    const [y, m, d] = dateStr.split('-').map(Number);
+    return new Date(y, m - 1, d);
+  }
+  return new Date(dateStr);
+}
+
+type Status = 'upcoming' | 'soon' | 'past' | 'annule';
+
+function getStatus(s: Sortie): Status {
+  if (s.annule) return 'annule';
+  const diff = localDate(s.dateDebut, s.isAllDay).getTime() - now.getTime();
+  if (diff < 0) return 'past';
+  if (diff < ONE_WEEK_MS) return 'soon';
+  return 'upcoming';
+}
+
+const BADGE: Record<Status, { label: string; cls: string }> = {
+  upcoming: { label: 'À venir',       cls: 'badge--upcoming' },
+  soon:     { label: 'Cette semaine', cls: 'badge--soon'     },
+  past:     { label: 'Passée',        cls: 'badge--past'     },
+  annule:   { label: 'Annulé',        cls: 'badge--annule'   },
+};
+
+const ACCENT_CLS: Record<TypeSortie, string> = {
+  regulier:  'accent--green',
+  intensif:  'accent--red',
+  evenement: 'accent--blue',
+  inconnu:   'accent--orange',
+};
+
+function toHtmlId(uid: string): string {
+  return 'dlg-' + uid.replace(/[^a-zA-Z0-9]/g, '_');
+}
+
+function formatCardDate(s: Sortie) {
+  const d = localDate(s.dateDebut, s.isAllDay);
+  return {
+    day:      d.getDate(),
+    weekday:  d.toLocaleString('fr-CA', { weekday: 'short' }),
+    monthYr:  d.toLocaleString('fr-CA', { month: 'short', year: 'numeric' }),
+  };
+}
+
+function formatFullDate(s: Sortie): string {
+  const start = localDate(s.dateDebut, s.isAllDay);
+  const opts: Intl.DateTimeFormatOptions = {
+    weekday: 'long', day: 'numeric', month: 'long', year: 'numeric',
+  };
+  if (!s.dateFin) return start.toLocaleString('fr-CA', opts);
+
+  const end = localDate(s.dateFin, s.isAllDay);
+  // GCal all-day events: DTEND est exclusif → soustraire 1 jour
+  if (s.isAllDay) end.setDate(end.getDate() - 1);
+  if (end.toDateString() === start.toDateString()) return start.toLocaleString('fr-CA', opts);
+  return `${start.toLocaleString('fr-CA', opts)} → ${end.toLocaleString('fr-CA', opts)}`;
+}
+
+/** Extrait du texte brut pour la preview de la carte (max 180 caractères) */
+function makeExcerpt(description: string | null): string | null {
+  if (!description) return null;
+  const plain = description
+    .replace(/^#{1,6}\s+/gm, '')
+    .replace(/\*\*|__|`/g, '')
+    .replace(/\[([^\]]+)\]\([^)]+\)/g, '$1')
+    .replace(/\n+/g, ' ')
+    .trim();
+  return plain.length > 180 ? plain.slice(0, 177) + '…' : plain;
+}
+
+// ── Traitement des sorties ─────────────────────────────────────────────────
+
+const processed = sorties.map((s) => ({
+  ...s,
+  status:    getStatus(s),
+  htmlId:    toHtmlId(s.id),
+  fullDate:  formatFullDate(s),
+  cardDate:  formatCardDate(s),
+  excerpt:   makeExcerpt(s.description),
+  accentCls: ACCENT_CLS[s.type],
+  badge:     BADGE[getStatus(s)],
+}));
+
+// Groupement par mois (clé "YYYY-MM" pour tri correct)
+const grouped = new Map<string, { label: string; items: typeof processed }>();
+for (const s of processed) {
+  const d = localDate(s.dateDebut, s.isAllDay);
+  const key = `${d.getFullYear()}-${String(d.getMonth()).padStart(2, '0')}`;
+  const label = d.toLocaleString('fr-CA', { month: 'long', year: 'numeric' });
+  if (!grouped.has(key)) grouped.set(key, { label, items: [] });
+  grouped.get(key)!.items.push(s);
+}
+
+// Statistiques
+const upcomingCount = processed.filter((s) => s.status === 'upcoming' || s.status === 'soon').length;
+const soonCount     = processed.filter((s) => s.status === 'soon').length;
+---
+
+<!-- ── Hero ── -->
+<section class="hero">
+  <div class="hero-inner">
+    <div class="hero-eyebrow">Club Cycliste Lévis</div>
+    <h1>Prochaines<br /><span class="accent">sorties</span></h1>
+    <p class="hero-sub">
+      Toutes les activités du programme Montagne Jeunesse, synchronisées
+      automatiquement depuis notre calendrier officiel.
+    </p>
+  </div>
+</section>
+
+<!-- ── Barre de filtres ── -->
+<div class="controls">
+  <div class="controls-bar">
+    <div class="filter-group">
+      <span class="filter-label">Période</span>
+      <div class="filter-chips">
+        <button class="chip active" data-filter="upcoming">À venir</button>
+        <button class="chip" data-filter="all">Tout</button>
+        <button class="chip" data-filter="past">Passées</button>
+      </div>
+    </div>
+    <div class="search-wrap">
+      <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>
+      </svg>
+      <input
+        id="sortie-search"
+        class="search-input"
+        type="search"
+        placeholder="Rechercher une sortie…"
+        aria-label="Rechercher une sortie"
+      />
+    </div>
+  </div>
+</div>
+
+<!-- ── Bannière : non configuré ── -->
+{!configured && (
+  <div class="banner banner--warn" role="alert">
+    <span class="banner-icon" aria-hidden="true">⚙️</span>
+    <div>
+      <strong>Calendrier non configuré</strong> — Ajoutez la variable
+      d'environnement <code>GCAL_ICS_URL</code> dans Vercel avec l'URL
+      <code>.ics</code> public de votre Google Calendar.
+    </div>
+  </div>
+)}
+
+<!-- ── Bannière : erreur de chargement ── -->
+{error && (
+  <div class="banner banner--error" role="alert">
+    <span class="banner-icon" aria-hidden="true">⚠️</span>
+    <div>
+      <strong>Impossible de charger le calendrier</strong> — {error}
+    </div>
+  </div>
+)}
+
+<!-- ── Contenu principal ── -->
+<main class="main">
+  {configured && !error && sorties.length === 0 ? (
+    <div class="state-box">
+      <div class="state-icon" aria-hidden="true">🏔️</div>
+      <div class="state-title">Aucune sortie planifiée</div>
+      <p class="state-sub">Revenez bientôt — le calendrier se met à jour automatiquement.</p>
+    </div>
+  ) : configured && !error ? (
+    <>
+      <!-- Statistiques -->
+      <div class="stats-bar" aria-label="Résumé du calendrier">
+        <div class="stat">
+          <div class="stat-num">{sorties.length}</div>
+          <div class="stat-label">Sortie{sorties.length > 1 ? 's' : ''}</div>
+        </div>
+        <div class="stats-divider" aria-hidden="true"></div>
+        <div class="stat">
+          <div class="stat-num">{upcomingCount}</div>
+          <div class="stat-label">À venir</div>
+        </div>
+        {soonCount > 0 && (
+          <>
+            <div class="stats-divider" aria-hidden="true"></div>
+            <div class="stat">
+              <div class="stat-num stat-num--yellow">{soonCount}</div>
+              <div class="stat-label">Cette semaine</div>
+            </div>
+          </>
+        )}
+      </div>
+
+      <!-- Sections par mois -->
+      {[...grouped.entries()].map(([key, { label, items }]) => (
+        <section class="month-section" data-month={key}>
+          <div class="month-header">
+            <h2 class="month-label">{label}</h2>
+            <span class="month-count">{items.length} sortie{items.length > 1 ? 's' : ''}</span>
+            <div class="month-line" aria-hidden="true"></div>
+          </div>
+
+          <div class="events-grid">
+            {items.map((s) => (
+              <article
+                class:list={['event-card', s.annule && 'event-card--annule']}
+                data-status={s.status}
+                data-search={`${s.titre} ${s.lieu ?? ''}`}
+                hidden={s.status === 'past'}
+              >
+                <!-- Barre d'accent couleur type -->
+                <div class:list={['card-accent', s.accentCls, s.annule && 'card-accent--annule']} aria-hidden="true"></div>
+
+                <div class="card-body">
+                  <!-- Date + badge -->
+                  <div class="card-date-row">
+                    <div class="card-date">
+                      <div class:list={['date-day', s.annule && 'date-day--muted']}>
+                        {s.cardDate.day}
+                      </div>
+                      <div class="date-detail">
+                        <div class="date-weekday">{s.cardDate.weekday}</div>
+                        <div class="date-month-year">{s.cardDate.monthYr}</div>
+                      </div>
+                    </div>
+                    <span class:list={['badge', s.badge.cls]}>{s.badge.label}</span>
+                  </div>
+
+                  <!-- Titre -->
+                  <h3 class:list={['card-title', s.annule && 'card-title--cancelled']}>
+                    {s.titre || 'Sans titre'}
+                  </h3>
+
+                  <!-- Raison d'annulation -->
+                  {s.annule && s.raisonAnnulation && (
+                    <div class="cancelled-reason">
+                      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                        <circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/>
+                      </svg>
+                      Annulé — {s.raisonAnnulation}
+                    </div>
+                  )}
+
+                  <!-- Extrait description -->
+                  {s.excerpt && <p class="card-desc">{s.excerpt}</p>}
+
+                  <!-- Métadonnées -->
+                  <div class="card-meta">
+                    {s.lieu && (
+                      <div class="meta-row">
+                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                          <path d="M21 10c0 7-9 13-9 13S3 17 3 10a9 9 0 0 1 18 0z"/>
+                          <circle cx="12" cy="10" r="3"/>
+                        </svg>
+                        <span>{s.lieu}</span>
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                <!-- Footer -->
+                <div class="card-footer">
+                  <span class="age-tag">Montagne Jeunesse</span>
+                  <button
+                    class="btn-details"
+                    onclick={`document.getElementById('${s.htmlId}').showModal()`}
+                    aria-haspopup="dialog"
+                  >
+                    Détails →
+                  </button>
+                </div>
+              </article>
+            ))}
+          </div>
+        </section>
+      ))}
+
+      <!-- État vide (après filtrage JS) -->
+      <div class="state-box" id="empty-state" hidden>
+        <div class="state-icon" aria-hidden="true">🏔️</div>
+        <div class="state-title">Aucune sortie trouvée</div>
+        <p class="state-sub">Modifiez vos filtres ou votre recherche.</p>
+      </div>
+    </>
+  ) : null}
+</main>
+
+<!-- ── Modales (dialog natif, pré-rendu SSR) ── -->
+{processed.map((s) => (
+  <dialog id={s.htmlId} class="event-dialog">
+    <div class="dialog-inner">
+      <!-- Bannière annulation -->
+      {s.annule && (
+        <div class="dialog-cancelled-banner" role="alert">
+          <span aria-hidden="true">🚫</span>
+          {s.raisonAnnulation
+            ? `Cette sortie est annulée — ${s.raisonAnnulation}`
+            : 'Cette sortie est annulée'}
+        </div>
+      )}
+
+      <!-- En-tête -->
+      <div class="dialog-header">
+        <h2 class:list={['dialog-title', s.annule && 'dialog-title--cancelled']}>
+          {s.titre || 'Sans titre'}
+        </h2>
+        <button
+          class="dialog-close"
+          onclick="this.closest('dialog').close()"
+          aria-label="Fermer"
+        >✕</button>
+      </div>
+
+      <!-- Date -->
+      <div class="dialog-section">
+        <div class="dialog-section-label">Date</div>
+        <div class="dialog-section-content">{s.fullDate}</div>
+      </div>
+
+      <!-- Lieu -->
+      {s.lieu && (
+        <div class="dialog-section">
+          <div class="dialog-section-label">Lieu</div>
+          <div class="dialog-section-content">{s.lieu}</div>
+        </div>
+      )}
+
+      <!-- Description (Markdown rendu) -->
+      {s.descriptionHtml && (
+        <div class="dialog-section">
+          <div class="dialog-section-label">Description</div>
+          <!-- Le contenu provient du Google Calendar du club (source contrôlée) -->
+          <div class="dialog-description" set:html={s.descriptionHtml} />
+        </div>
+      )}
+
+      <!-- Actions -->
+      <div class="dialog-actions">
+        {s.urlGcal && (
+          <a
+            href={s.urlGcal}
+            class="btn-primary"
+            target="_blank"
+            rel="noopener noreferrer"
+          >
+            Voir dans Google Calendar
+          </a>
+        )}
+        <button class="btn-secondary" onclick="this.closest('dialog').close()">
+          Fermer
+        </button>
+      </div>
+    </div>
+  </dialog>
+))}
+
+<!-- ── Script : filtres + recherche ── -->
+<script>
+  const chips = document.querySelectorAll<HTMLButtonElement>('[data-filter]');
+  const searchInput = document.querySelector<HTMLInputElement>('#sortie-search');
+  const allCards = document.querySelectorAll<HTMLElement>('[data-status]');
+  const monthSections = document.querySelectorAll<HTMLElement>('[data-month]');
+  const emptyState = document.getElementById('empty-state');
+
+  let activeFilter = 'upcoming';
+
+  function applyFilters() {
+    const query = searchInput?.value.toLowerCase().trim() ?? '';
+    let visibleCount = 0;
+
+    for (const card of allCards) {
+      const status = card.dataset.status ?? '';
+      const searchable = (card.dataset.search ?? '').toLowerCase();
+
+      const matchesFilter =
+        activeFilter === 'all' ||
+        (activeFilter === 'upcoming' && (status === 'upcoming' || status === 'soon')) ||
+        (activeFilter === 'past' && (status === 'past' || status === 'annule'));
+
+      const matchesSearch = !query || searchable.includes(query);
+      const visible = matchesFilter && matchesSearch;
+
+      card.hidden = !visible;
+      if (visible) visibleCount++;
+    }
+
+    // Masquer les sections de mois vides
+    for (const section of monthSections) {
+      const hasVisible = section.querySelector('[data-status]:not([hidden])') !== null;
+      (section as HTMLElement).hidden = !hasVisible;
+    }
+
+    if (emptyState) emptyState.hidden = visibleCount > 0;
+  }
+
+  // Chips de filtre
+  for (const chip of chips) {
+    chip.addEventListener('click', () => {
+      chips.forEach((c) => c.classList.remove('active'));
+      chip.classList.add('active');
+      activeFilter = chip.dataset.filter ?? 'upcoming';
+      applyFilters();
+    });
+  }
+
+  // Recherche texte
+  searchInput?.addEventListener('input', applyFilters);
+
+  // Fermeture des dialogues au clic sur le backdrop
+  document.querySelectorAll<HTMLDialogElement>('.event-dialog').forEach((dialog) => {
+    dialog.addEventListener('click', (e) => {
+      if (e.target === dialog) dialog.close();
+    });
+  });
+
+  // Fermeture au clavier (Escape est géré nativement par <dialog>)
+  applyFilters();
+</script>
+
+<style>
+  /* ── Hero ── */
+  .hero {
+    background: linear-gradient(135deg, #0d1117 0%, #1a1f2e 50%, #0f1620 100%);
+    padding: 3rem 2rem 2.5rem;
+    position: relative;
+    overflow: hidden;
+  }
+
+  .hero::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background:
+      radial-gradient(ellipse 60% 80% at 85% 50%, rgba(255, 92, 26, 0.12) 0%, transparent 70%),
+      radial-gradient(ellipse 40% 60% at 10% 80%, rgba(255, 208, 0, 0.06) 0%, transparent 60%);
+  }
+
+  .hero-inner {
+    max-width: 960px;
+    margin: 0 auto;
+    position: relative;
+    z-index: 1;
+  }
+
+  .hero-eyebrow {
+    font-family: 'Barlow Condensed', sans-serif;
+    font-size: 0.8rem;
+    font-weight: 600;
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
+    color: var(--orange);
+    margin-bottom: 0.5rem;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .hero-eyebrow::before {
+    content: '';
+    display: inline-block;
+    width: 20px;
+    height: 2px;
+    background: var(--orange);
+  }
+
+  .hero h1 {
+    font-family: 'Barlow Condensed', sans-serif;
+    font-weight: 900;
+    font-size: clamp(2.8rem, 6vw, 4.5rem);
+    line-height: 0.95;
+    text-transform: uppercase;
+    letter-spacing: -0.01em;
+  }
+
+  .hero h1 .accent { color: var(--orange); }
+
+  .hero-sub {
+    margin-top: 1rem;
+    color: var(--text-muted);
+    font-size: 0.95rem;
+    max-width: 420px;
+    line-height: 1.6;
+  }
+
+  /* ── Contrôles ── */
+  .controls {
+    max-width: 960px;
+    margin: 0 auto;
+    padding: 0 2rem;
+    position: relative;
+    z-index: 2;
+  }
+
+  .controls-bar {
+    background: var(--dark-3);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 1rem 1.25rem;
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+    flex-wrap: wrap;
+    transform: translateY(-1.2rem);
+  }
+
+  .filter-group {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    flex: 1;
+    min-width: 200px;
+  }
+
+  .filter-label {
+    font-size: 0.72rem;
+    font-weight: 600;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--text-muted);
+    white-space: nowrap;
+  }
+
+  .filter-chips {
+    display: flex;
+    gap: 6px;
+    flex-wrap: wrap;
+  }
+
+  .chip {
+    padding: 4px 12px;
+    border-radius: 2px;
+    font-size: 0.78rem;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    cursor: pointer;
+    border: 1px solid var(--border);
+    background: transparent;
+    color: var(--text-muted);
+    transition: all 0.15s;
+  }
+
+  .chip:hover { border-color: var(--orange); color: var(--text); }
+  .chip.active { background: var(--orange); border-color: var(--orange); color: #fff; }
+
+  .search-wrap {
+    position: relative;
+    flex: 1;
+    min-width: 180px;
+    max-width: 260px;
+  }
+
+  .search-wrap svg {
+    position: absolute;
+    left: 10px;
+    top: 50%;
+    transform: translateY(-50%);
+    color: var(--text-muted);
+    pointer-events: none;
+  }
+
+  .search-input {
+    width: 100%;
+    background: var(--dark);
+    border: 1px solid var(--border);
+    color: var(--text);
+    padding: 7px 12px 7px 34px;
+    font-size: 0.85rem;
+    border-radius: 2px;
+    outline: none;
+    transition: border-color 0.15s;
+  }
+
+  .search-input:focus { border-color: var(--orange); }
+  .search-input::placeholder { color: var(--text-muted); }
+
+  /* ── Bannières ── */
+  .banner {
+    max-width: 960px;
+    margin: 0 auto 1.5rem;
+    padding: 0.9rem 1.2rem 0.9rem 2rem;
+    display: flex;
+    align-items: flex-start;
+    gap: 0.75rem;
+    border-radius: 4px;
+    font-size: 0.85rem;
+    line-height: 1.55;
+  }
+
+  .banner--warn {
+    background: rgba(255, 208, 0, 0.07);
+    border: 1px dashed rgba(255, 208, 0, 0.35);
+    color: rgba(255, 208, 0, 0.9);
+  }
+
+  .banner--error {
+    background: rgba(255, 59, 48, 0.08);
+    border: 1px dashed rgba(255, 59, 48, 0.35);
+    color: rgba(255, 100, 90, 0.95);
+  }
+
+  .banner code {
+    background: rgba(255, 255, 255, 0.08);
+    padding: 1px 5px;
+    border-radius: 3px;
+    font-size: 0.8em;
+  }
+
+  .banner-icon { font-size: 1.1rem; flex-shrink: 0; margin-top: 1px; }
+
+  /* ── Contenu principal ── */
+  .main {
+    max-width: 960px;
+    margin: 0 auto;
+    padding: 0 2rem 4rem;
+  }
+
+  /* Statistiques */
+  .stats-bar {
+    display: flex;
+    gap: 1.5rem;
+    margin-bottom: 2rem;
+    flex-wrap: wrap;
+  }
+
+  .stat { display: flex; flex-direction: column; gap: 2px; }
+
+  .stat-num {
+    font-family: 'Barlow Condensed', sans-serif;
+    font-weight: 900;
+    font-size: 2rem;
+    line-height: 1;
+    color: var(--orange);
+  }
+
+  .stat-num--yellow { color: var(--yellow); }
+
+  .stat-label {
+    font-size: 0.72rem;
+    font-weight: 600;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--text-muted);
+  }
+
+  .stats-divider {
+    width: 1px;
+    height: 40px;
+    background: var(--border);
+    align-self: center;
+  }
+
+  /* Section mois */
+  .month-section { margin-bottom: 2.5rem; }
+
+  .month-header {
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+    margin-bottom: 1rem;
+  }
+
+  .month-label {
+    font-family: 'Barlow Condensed', sans-serif;
+    font-weight: 900;
+    font-size: 1.6rem;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    line-height: 1;
+  }
+
+  .month-count {
+    font-size: 0.75rem;
+    font-weight: 600;
+    color: var(--text-muted);
+    background: var(--dark-3);
+    padding: 3px 10px;
+    border-radius: 20px;
+    white-space: nowrap;
+  }
+
+  .month-line { flex: 1; height: 1px; background: var(--border); }
+
+  /* Grille de cartes */
+  .events-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+    gap: 1rem;
+  }
+
+  /* ── Carte ── */
+  .event-card {
+    background: var(--card-bg);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+    transition: transform 0.15s, border-color 0.15s;
+    cursor: default;
+  }
+
+  .event-card:has(.btn-details:hover) {
+    transform: translateY(-3px);
+    border-color: var(--orange);
+  }
+
+  .event-card--annule {
+    opacity: 0.6;
+    filter: saturate(0.3);
+  }
+
+  .event-card--annule:has(.btn-details:hover) {
+    border-color: var(--red);
+    opacity: 0.75;
+    filter: saturate(0.5);
+  }
+
+  /* Barre accent */
+  .card-accent { height: 3px; background: var(--orange); }
+  .card-accent--annule { background: var(--red) !important; }
+  .accent--green   { background: var(--green); }
+  .accent--red     { background: var(--red); }
+  .accent--blue    { background: var(--blue); }
+  .accent--orange  { background: var(--orange); }
+
+  .card-body { padding: 1.1rem; flex: 1; }
+
+  .card-date-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 0.7rem;
+  }
+
+  .card-date {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .date-day {
+    font-family: 'Barlow Condensed', sans-serif;
+    font-weight: 900;
+    font-size: 2rem;
+    line-height: 1;
+    color: var(--orange);
+  }
+
+  .date-day--muted { color: var(--text-muted); }
+
+  .date-detail { display: flex; flex-direction: column; }
+
+  .date-weekday {
+    font-size: 0.7rem;
+    font-weight: 700;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--text-muted);
+  }
+
+  .date-month-year {
+    font-size: 0.78rem;
+    font-weight: 600;
+    color: var(--text);
+  }
+
+  /* Badges */
+  .badge {
+    font-size: 0.65rem;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    padding: 3px 8px;
+    border-radius: 2px;
+    white-space: nowrap;
+  }
+
+  .badge--upcoming { background: rgba(0, 200, 83, 0.15); color: var(--green); }
+  .badge--soon     { background: rgba(255, 92, 26, 0.15); color: var(--orange); }
+  .badge--past     { background: rgba(138, 149, 168, 0.1); color: var(--text-muted); }
+  .badge--annule   {
+    background: rgba(255, 59, 48, 0.15);
+    color: var(--red);
+    border: 1px solid rgba(255, 59, 48, 0.3);
+  }
+
+  .card-title {
+    font-family: 'Barlow Condensed', sans-serif;
+    font-weight: 700;
+    font-size: 1.15rem;
+    letter-spacing: 0.01em;
+    line-height: 1.2;
+    margin-bottom: 0.5rem;
+  }
+
+  .card-title--cancelled {
+    text-decoration: line-through;
+    text-decoration-color: rgba(255, 59, 48, 0.6);
+    text-decoration-thickness: 2px;
+  }
+
+  .cancelled-reason {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-top: 0.3rem;
+    margin-bottom: 0.5rem;
+    font-size: 0.78rem;
+    color: var(--red);
+    opacity: 0.85;
+  }
+
+  .card-desc {
+    font-size: 0.82rem;
+    color: var(--text-muted);
+    line-height: 1.55;
+    margin-bottom: 0.8rem;
+    display: -webkit-box;
+    -webkit-line-clamp: 3;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+  }
+
+  .card-meta { display: flex; flex-direction: column; gap: 4px; }
+
+  .meta-row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 0.78rem;
+    color: var(--text-muted);
+  }
+
+  .meta-row svg { flex-shrink: 0; color: var(--orange); opacity: 0.8; }
+
+  .card-footer {
+    padding: 0.75rem 1.1rem;
+    border-top: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
+
+  .age-tag {
+    font-size: 0.7rem;
+    font-weight: 700;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--yellow);
+    background: rgba(255, 208, 0, 0.1);
+    padding: 3px 8px;
+    border-radius: 2px;
+  }
+
+  .btn-details {
+    font-family: 'Barlow Condensed', sans-serif;
+    font-weight: 700;
+    font-size: 0.8rem;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--orange);
+    background: none;
+    border: 1px solid rgba(255, 92, 26, 0.3);
+    padding: 4px 12px;
+    border-radius: 2px;
+    cursor: pointer;
+    transition: all 0.15s;
+  }
+
+  .btn-details:hover { background: var(--orange); color: #fff; border-color: var(--orange); }
+
+  /* ── État vide ── */
+  .state-box {
+    text-align: center;
+    padding: 4rem 2rem;
+    color: var(--text-muted);
+  }
+
+  .state-icon { font-size: 3rem; margin-bottom: 1rem; opacity: 0.4; }
+
+  .state-title {
+    font-family: 'Barlow Condensed', sans-serif;
+    font-weight: 700;
+    font-size: 1.4rem;
+    text-transform: uppercase;
+    color: var(--text);
+    margin-bottom: 0.4rem;
+  }
+
+  .state-sub { font-size: 0.9rem; }
+
+  /* ── Responsive ── */
+  @media (max-width: 600px) {
+    .hero { padding: 2rem 1rem 2rem; }
+    .controls { padding: 0 1rem; }
+    .banner { padding-inline: 1rem; }
+    .main { padding: 0 1rem 3rem; }
+    .events-grid { grid-template-columns: 1fr; }
+  }
+</style>
+
+<!-- Styles globaux pour le dialog natif -->
+<style is:global>
+  .event-dialog {
+    background: var(--dark-2);
+    border: 1px solid var(--border);
+    border-top: 3px solid var(--orange);
+    border-radius: 4px;
+    max-width: 540px;
+    width: calc(100vw - 2rem);
+    max-height: 90dvh;
+    overflow-y: auto;
+    padding: 0;
+    color: var(--text);
+  }
+
+  .event-dialog::backdrop {
+    background: rgba(0, 0, 0, 0.75);
+    backdrop-filter: blur(2px);
+  }
+
+  .dialog-inner { padding: 1.75rem; }
+
+  .dialog-cancelled-banner {
+    background: rgba(255, 59, 48, 0.1);
+    border: 1px solid rgba(255, 59, 48, 0.3);
+    border-radius: 3px;
+    padding: 0.75rem 1rem;
+    margin-bottom: 1.2rem;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    color: var(--red);
+    font-weight: 600;
+    font-size: 0.9rem;
+  }
+
+  .dialog-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    gap: 1rem;
+    margin-bottom: 1.25rem;
+  }
+
+  .dialog-title {
+    font-family: 'Barlow Condensed', sans-serif;
+    font-weight: 900;
+    font-size: clamp(1.3rem, 3vw, 1.7rem);
+    text-transform: uppercase;
+    line-height: 1.1;
+  }
+
+  .dialog-title--cancelled {
+    text-decoration: line-through;
+    text-decoration-color: rgba(255, 59, 48, 0.5);
+  }
+
+  .dialog-close {
+    background: none;
+    border: none;
+    color: var(--text-muted);
+    font-size: 1.4rem;
+    cursor: pointer;
+    line-height: 1;
+    padding: 2px 6px;
+    border-radius: 2px;
+    transition: color 0.15s;
+    flex-shrink: 0;
+  }
+
+  .dialog-close:hover { color: var(--text); }
+
+  .dialog-section { margin-bottom: 1rem; }
+
+  .dialog-section-label {
+    font-size: 0.7rem;
+    font-weight: 700;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--orange);
+    margin-bottom: 0.3rem;
+  }
+
+  .dialog-section-content {
+    font-size: 0.9rem;
+    color: var(--text-muted);
+    line-height: 1.6;
+  }
+
+  /* Rendu Markdown dans la description */
+  .dialog-description {
+    font-size: 0.9rem;
+    color: var(--text-muted);
+    line-height: 1.7;
+  }
+
+  .dialog-description h1,
+  .dialog-description h2,
+  .dialog-description h3 {
+    font-family: 'Barlow Condensed', sans-serif;
+    font-weight: 700;
+    text-transform: uppercase;
+    color: var(--text);
+    margin-top: 1rem;
+    margin-bottom: 0.4rem;
+    font-size: 1rem;
+    letter-spacing: 0.04em;
+  }
+
+  .dialog-description p { margin-bottom: 0.6rem; }
+
+  .dialog-description ul,
+  .dialog-description ol {
+    padding-left: 1.4rem;
+    margin-bottom: 0.6rem;
+  }
+
+  .dialog-description strong { color: var(--text); font-weight: 600; }
+
+  .dialog-description code {
+    background: rgba(255, 255, 255, 0.07);
+    padding: 1px 5px;
+    border-radius: 3px;
+    font-size: 0.85em;
+  }
+
+  .dialog-actions {
+    display: flex;
+    gap: 0.75rem;
+    margin-top: 1.5rem;
+    flex-wrap: wrap;
+  }
+
+  .btn-primary {
+    background: var(--orange);
+    color: #fff;
+    border: none;
+    padding: 9px 20px;
+    font-family: 'Barlow Condensed', sans-serif;
+    font-weight: 700;
+    font-size: 0.9rem;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    cursor: pointer;
+    border-radius: 2px;
+    transition: background 0.15s;
+    text-decoration: none;
+    display: inline-block;
+  }
+
+  .btn-primary:hover { background: var(--orange-light); }
+
+  .btn-secondary {
+    background: transparent;
+    color: var(--text-muted);
+    border: 1px solid var(--border);
+    padding: 9px 20px;
+    font-family: 'Barlow Condensed', sans-serif;
+    font-weight: 700;
+    font-size: 0.9rem;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    cursor: pointer;
+    border-radius: 2px;
+    transition: all 0.15s;
+  }
+
+  .btn-secondary:hover { border-color: var(--text-muted); color: var(--text); }
+</style>
