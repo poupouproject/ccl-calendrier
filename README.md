@@ -68,17 +68,40 @@ npm run dev
 
 | Action | Dans Google Calendar |
 |---|---|
-| Créer une sortie | Nouvel événement, couleur = type (vert / rouge / bleu) |
+| Créer une sortie | Nouvel événement + ajouter un tag dans la description |
+| Spécifier le type | Ajouter `[type:regulier]`, `[type:intensif]` ou `[type:evenement]` dans la description |
 | Annuler | Préfixer le titre : `[ANNULÉ]` ou `[ANNULÉ - Météo]` |
 | Modifier | Modifier l'événement → visible au prochain chargement |
 
-### Couleurs → types
+### Exemple : entraînement intensif
 
-| Couleur GCal | Type affiché |
-|---|---|
-| 🟢 Sauge | Sortie régulière |
-| 🔴 Tomate | Entraînement intensif |
-| 🔵 Bleuet / Paon | Événement tiers |
+**Titre :** `Entraînement technique — Virages serrés`  
+**Description :**
+```
+[type:intensif]
+
+Atelier de 2h axé sur la technique de freinage et la négociation des virages serrés en single track.
+
+## Ce qu'il faut apporter
+- Casque intégral recommandé
+- Eau (1.5L minimum)
+- Gants
+```
+
+Le tag `[type:intensif]` :
+- Définit la couleur d'accent de la carte (rouge)
+- N'apparaît pas sur le site (auto-supprimé)
+- Fonctionne indépendamment de la couleur GCal (flux `.ics` public n'inclut pas les couleurs)
+
+### Types disponibles
+
+| Tag | Couleur d'accent | Utilité |
+|---|---|---|
+| `[type:regulier]` | Vert | Sorties régulières pour tous |
+| `[type:intensif]` | Rouge | Entraînement ciblé / difficile |
+| `[type:evenement]` | Bleu | Événements externes / occasionnels |
+
+*Si aucun tag n'est spécifié, le type par défaut est `regulier` (vert).*
 
 ## Commandes
 

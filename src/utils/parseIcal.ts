@@ -36,6 +36,7 @@ const COLOR_TO_TYPE: Record<string, TypeSortie> = {
 };
 
 const ANNULE_REGEX = /^\[ANNULÉ(?:\s*[-–]\s*([^\]]+))?\]\s*/i;
+const TYPE_REGEX = /\[\s*type\s*:\s*(regulier|intensif|evenement)\s*\]/i;
 
 function parseAnnulation(titre: string): {
   annule: boolean;
@@ -49,6 +50,27 @@ function parseAnnulation(titre: string): {
     raison: match[1]?.trim() ?? null,
     titreNettoye: titre.slice(match[0].length).trim(),
   };
+}
+
+/** Extrait le type de sortie depuis un tag [type:XXX] dans la description */
+function extractTypeFromDescription(description: string | null): TypeSortie | null {
+  if (!description) return null;
+  
+  const match = description.match(TYPE_REGEX);
+  if (!match) return null;
+  
+  // match[0] = le tag entier ex: "[type:intensif]"
+  // match[1] = le type capturé ex: "intensif"
+  const typeStr = match[1]?.toLowerCase();
+  
+  if (!typeStr) return null;
+  
+  // Valider que c'est bien un des types connus
+  if (typeStr === 'regulier' || typeStr === 'intensif' || typeStr === 'evenement') {
+    return typeStr as TypeSortie;
+  }
+  
+  return null;
 }
 
 /**
@@ -92,11 +114,20 @@ export async function fetchAndParseSorties(icsUrl: string): Promise<Sortie[]> {
     const urlGcal =
       (vevent.getFirstPropertyValue('url') as string | null) ?? null;
 
-    // Couleur → type (RFC 7986 COLOR property)
-    const colorRaw = (
-      (vevent.getFirstPropertyValue('color') as string | null) ?? ''
-    ).toLowerCase();
-    const type: TypeSortie = COLOR_TO_TYPE[colorRaw] ?? 'inconnu';
+    // Type de sortie : chercher d'abord un tag [type:XXX] dans la description
+    // Fallback : couleur GCal (si disponible), puis défaut à 'regulier'
+    let type: TypeSortie = 'regulier';
+    const typeFromDesc = extractTypeFromDescription(descriptionRaw);
+    if (typeFromDesc) {
+      type = typeFromDesc;
+    } else {
+      const colorRaw = (
+        (vevent.getFirstPropertyValue('color') as string | null) ?? ''
+      ).toLowerCase();
+      if (colorRaw && COLOR_TO_TYPE[colorRaw]) {
+        type = COLOR_TO_TYPE[colorRaw];
+      }
+    }
 
     // Annulation
     const { annule, raison, titreNettoye } = parseAnnulation(titreOriginal);
@@ -117,9 +148,13 @@ export async function fetchAndParseSorties(icsUrl: string): Promise<Sortie[]> {
       : null;
 
     // Markdown → HTML (marked est synchrone par défaut)
+    // Nettoyer les tags métadonnées ([type:XXX]) avant rendu
     let descriptionHtml: string | null = null;
     if (descriptionRaw) {
-      descriptionHtml = String(marked.parse(descriptionRaw));
+      const cleanedDesc = descriptionRaw.replace(TYPE_REGEX, '').trim();
+      if (cleanedDesc) {
+        descriptionHtml = String(marked.parse(cleanedDesc));
+      }
     }
 
     sorties.push({

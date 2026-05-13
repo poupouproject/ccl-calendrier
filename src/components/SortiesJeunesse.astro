@@ -46,6 +46,13 @@ const ACCENT_CLS: Record<TypeSortie, string> = {
   inconnu:   'accent--orange',
 };
 
+const TYPE_LABEL: Record<TypeSortie, { label: string; cls: string }> = {
+  regulier:  { label: 'Régulier',      cls: 'type-tag--green'  },
+  intensif:  { label: 'Intensif',      cls: 'type-tag--red'    },
+  evenement: { label: 'Événement',     cls: 'type-tag--blue'   },
+  inconnu:   { label: 'Sortie',        cls: 'type-tag--orange' },
+};
+
 function toHtmlId(uid: string): string {
   return 'dlg-' + uid.replace(/[^a-zA-Z0-9]/g, '_');
 }
@@ -77,6 +84,7 @@ function formatFullDate(s: Sortie): string {
 function makeExcerpt(description: string | null): string | null {
   if (!description) return null;
   const plain = description
+    .replace(/\[\s*type\s*:[^\]]+\]/gi, '')  // supprimer le tag [type:XXX]
     .replace(/^#{1,6}\s+/gm, '')
     .replace(/\*\*|__|`/g, '')
     .replace(/\[([^\]]+)\]\([^)]+\)/g, '$1')
@@ -96,6 +104,7 @@ const processed = sorties.map((s) => ({
   excerpt:   makeExcerpt(s.description),
   accentCls: ACCENT_CLS[s.type],
   badge:     BADGE[getStatus(s)],
+  typeTag:   TYPE_LABEL[s.type],
 }));
 
 // Groupement par mois (clé "YYYY-MM" pour tri correct)
@@ -274,7 +283,7 @@ const soonCount     = processed.filter((s) => s.status === 'soon').length;
 
                 <!-- Footer -->
                 <div class="card-footer">
-                  <span class="age-tag">Montagne Jeunesse</span>
+                  <span class:list={['type-tag', s.typeTag.cls]}>{s.typeTag.label}</span>
                   <button
                     class="btn-details"
                     onclick={`document.getElementById('${s.htmlId}').showModal()`}
@@ -883,6 +892,20 @@ const soonCount     = processed.filter((s) => s.status === 'soon').length;
 
   .btn-details:hover { background: var(--orange); color: #fff; border-color: var(--orange); }
 
+  /* Type tag */
+  .type-tag {
+    font-size: 0.7rem;
+    font-weight: 700;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    padding: 3px 8px;
+    border-radius: 2px;
+  }
+  .type-tag--green  { color: var(--green);  background: rgba(0, 200, 83, 0.12);  }
+  .type-tag--red    { color: var(--red);    background: rgba(255, 59, 48, 0.12); }
+  .type-tag--blue   { color: var(--blue);   background: rgba(64, 160, 255, 0.12); }
+  .type-tag--orange { color: var(--orange); background: rgba(255, 92, 26, 0.12); }
+
   /* ── État vide ── */
   .state-box {
     text-align: center;
@@ -916,6 +939,8 @@ const soonCount     = processed.filter((s) => s.status === 'soon').length;
 <!-- Styles globaux pour le dialog natif -->
 <style is:global>
   .event-dialog {
+    /* Restaurer le centrage natif effacé par le reset CSS */
+    margin: auto;
     background: var(--dark-2);
     border: 1px solid var(--border);
     border-top: 3px solid var(--orange);
