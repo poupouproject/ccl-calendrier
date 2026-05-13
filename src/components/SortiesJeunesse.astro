@@ -22,11 +22,17 @@ function localDate(dateStr: string, isAllDay: boolean): Date {
   return new Date(dateStr);
 }
 
-type Status = 'upcoming' | 'soon' | 'past' | 'annule';
+type Status = 'upcoming' | 'today' | 'soon' | 'past' | 'annule';
 
 function getStatus(s: Sortie): Status {
   if (s.annule) return 'annule';
-  const diff = localDate(s.dateDebut, s.isAllDay).getTime() - now.getTime();
+  const sortieDate = localDate(s.dateDebut, s.isAllDay);
+  const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const sortieDateOnly = new Date(sortieDate.getFullYear(), sortieDate.getMonth(), sortieDate.getDate());
+  
+  if (sortieDateOnly.getTime() === todayStart.getTime()) return 'today';
+  
+  const diff = sortieDate.getTime() - now.getTime();
   if (diff < 0) return 'past';
   if (diff < ONE_WEEK_MS) return 'soon';
   return 'upcoming';
@@ -34,6 +40,7 @@ function getStatus(s: Sortie): Status {
 
 const BADGE: Record<Status, { label: string; cls: string }> = {
   upcoming: { label: 'À venir',       cls: 'badge--upcoming' },
+  today:    { label: 'Aujourd\'hui',  cls: 'badge--today'    },
   soon:     { label: 'Cette semaine', cls: 'badge--soon'     },
   past:     { label: 'Passée',        cls: 'badge--past'     },
   annule:   { label: 'Annulé',        cls: 'badge--annule'   },
@@ -118,7 +125,7 @@ for (const s of processed) {
 }
 
 // Statistiques
-const upcomingCount = processed.filter((s) => s.status === 'upcoming' || s.status === 'soon').length;
+const upcomingCount = processed.filter((s) => s.status === 'upcoming' || s.status === 'today' || s.status === 'soon').length;
 const soonCount     = processed.filter((s) => s.status === 'soon').length;
 ---
 
@@ -397,7 +404,7 @@ const soonCount     = processed.filter((s) => s.status === 'soon').length;
 
       const matchesFilter =
         activeFilter === 'all' ||
-        (activeFilter === 'upcoming' && (status === 'upcoming' || status === 'soon')) ||
+        (activeFilter === 'upcoming' && (status === 'upcoming' || status === 'today' || status === 'soon')) ||
         (activeFilter === 'past' && (status === 'past' || status === 'annule'));
 
       const matchesSearch = !query || searchable.includes(query);
@@ -799,6 +806,7 @@ const soonCount     = processed.filter((s) => s.status === 'soon').length;
   }
 
   .badge--upcoming { background: rgba(0, 200, 83, 0.15); color: var(--green); }
+  .badge--today    { background: rgba(255, 92, 26, 0.25); color: var(--orange); font-weight: 800; }
   .badge--soon     { background: rgba(255, 92, 26, 0.15); color: var(--orange); }
   .badge--past     { background: rgba(138, 149, 168, 0.1); color: var(--text-muted); }
   .badge--annule   {
