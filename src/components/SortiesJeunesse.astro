@@ -75,16 +75,44 @@ function formatCardDate(s: Sortie) {
 
 function formatFullDate(s: Sortie): string {
   const start = localDate(s.dateDebut, s.isAllDay);
-  const opts: Intl.DateTimeFormatOptions = {
+  
+  // Événements toute la journée : afficher seulement la date
+  if (s.isAllDay) {
+    const dateOpts: Intl.DateTimeFormatOptions = {
+      weekday: 'long', day: 'numeric', month: 'long', year: 'numeric',
+    };
+    if (!s.dateFin) return start.toLocaleString('fr-CA', dateOpts);
+    
+    const end = localDate(s.dateFin, s.isAllDay);
+    // GCal all-day events: DTEND est exclusif → soustraire 1 jour
+    end.setDate(end.getDate() - 1);
+    if (end.toDateString() === start.toDateString()) return start.toLocaleString('fr-CA', dateOpts);
+    return `${start.toLocaleString('fr-CA', dateOpts)} → ${end.toLocaleString('fr-CA', dateOpts)}`;
+  }
+  
+  // Événements avec heure : afficher date + heures
+  const dateOpts: Intl.DateTimeFormatOptions = {
     weekday: 'long', day: 'numeric', month: 'long', year: 'numeric',
   };
-  if (!s.dateFin) return start.toLocaleString('fr-CA', opts);
-
+  const timeOpts: Intl.DateTimeFormatOptions = {
+    hour: 'numeric', minute: '2-digit', hour12: false,
+  };
+  
+  if (!s.dateFin) {
+    return `${start.toLocaleString('fr-CA', dateOpts)}, ${start.toLocaleString('fr-CA', timeOpts)}`;
+  }
+  
   const end = localDate(s.dateFin, s.isAllDay);
-  // GCal all-day events: DTEND est exclusif → soustraire 1 jour
-  if (s.isAllDay) end.setDate(end.getDate() - 1);
-  if (end.toDateString() === start.toDateString()) return start.toLocaleString('fr-CA', opts);
-  return `${start.toLocaleString('fr-CA', opts)} → ${end.toLocaleString('fr-CA', opts)}`;
+  const isSameDay = 
+    start.getFullYear() === end.getFullYear() &&
+    start.getMonth() === end.getMonth() &&
+    start.getDate() === end.getDate();
+  
+  if (isSameDay) {
+    return `${start.toLocaleString('fr-CA', dateOpts)}, ${start.toLocaleString('fr-CA', timeOpts)} à ${end.toLocaleString('fr-CA', timeOpts)}`;
+  }
+  
+  return `${start.toLocaleString('fr-CA', {...dateOpts, ...timeOpts})} → ${end.toLocaleString('fr-CA', {...dateOpts, ...timeOpts})}`;
 }
 
 /** Extrait du texte brut pour la preview de la carte (max 180 caractères) */
