@@ -137,14 +137,16 @@ export async function fetchAndParseSorties(icsUrl: string): Promise<Sortie[]> {
     const endTime = event.endDate;
     const isAllDay = startTime.isDate;
 
+    // Pour les événements avec heure, extraire les composantes locales du calendrier
+    // au lieu de convertir en UTC avec toISOString()
     const dateDebut = isAllDay
-      ? startTime.toString()                // "YYYY-MM-DD"
-      : startTime.toJSDate().toISOString(); // ISO 8601
+      ? startTime.toString()  // "YYYY-MM-DD"
+      : `${startTime.year}-${String(startTime.month).padStart(2, '0')}-${String(startTime.day).padStart(2, '0')}T${String(startTime.hour).padStart(2, '0')}:${String(startTime.minute).padStart(2, '0')}:00`;
 
     const dateFin = endTime
       ? isAllDay
         ? endTime.toString()
-        : endTime.toJSDate().toISOString()
+        : `${endTime.year}-${String(endTime.month).padStart(2, '0')}-${String(endTime.day).padStart(2, '0')}T${String(endTime.hour).padStart(2, '0')}:${String(endTime.minute).padStart(2, '0')}:00`
       : null;
 
     // Markdown → HTML (marked est synchrone par défaut)
@@ -187,5 +189,11 @@ function toTimestamp(dateStr: string, isAllDay: boolean): number {
     const [y, m, d] = dateStr.split('-').map(Number);
     return new Date(y, m - 1, d).getTime();
   }
-  return new Date(dateStr).getTime();
+  // Parser les composantes de date/heure locale
+  const match = dateStr.match(/(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})/);
+  if (match) {
+    const [, y, m, d, h, min, s] = match.map(Number);
+    return new Date(y, m - 1, d, h, min, s).getTime();
+  }
+  return new Date(dateStr).getTime(); // fallback
 }

@@ -19,7 +19,13 @@ function localDate(dateStr: string, isAllDay: boolean): Date {
     const [y, m, d] = dateStr.split('-').map(Number);
     return new Date(y, m - 1, d);
   }
-  return new Date(dateStr);
+  // Pour les événements avec heure, parser les composantes pour créer une Date locale
+  const match = dateStr.match(/(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})/);
+  if (match) {
+    const [, y, m, d, h, min, s] = match.map(Number);
+    return new Date(y, m - 1, d, h, min, s);
+  }
+  return new Date(dateStr); // fallback
 }
 
 type Status = 'upcoming' | 'today' | 'soon' | 'past' | 'annule';
