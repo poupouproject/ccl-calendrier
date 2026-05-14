@@ -45,6 +45,10 @@ const canonical = canonicalUrl ?? new URL(Astro.url.pathname, siteConfig.url).hr
   </head>
   <body>
     <header class="site-header">
+      <a class="back-link" href={siteConfig.mainSiteUrl} aria-label="Retour au site du Club Cycliste Lévis">
+        <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="15 18 9 12 15 6"/></svg>
+        clubcyclistelevis.ca
+      </a>
       <div class="logo">
         <div class="logo-badge">CCL</div>
         <div class="logo-title">Montagne <span>Jeunesse</span></div>
@@ -68,7 +72,25 @@ const canonical = canonicalUrl ?? new URL(Astro.url.pathname, siteConfig.url).hr
     position: sticky;
     top: 0;
     z-index: 100;
+    gap: 1rem;
   }
+
+  .back-link {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    font-size: 0.72rem;
+    font-weight: 600;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--text-muted);
+    text-decoration: none;
+    white-space: nowrap;
+    transition: color 0.15s;
+    flex-shrink: 0;
+  }
+
+  .back-link:hover { color: var(--orange); }
 
   .logo {
     display: flex;
@@ -115,6 +137,9 @@ const canonical = canonicalUrl ?? new URL(Astro.url.pathname, siteConfig.url).hr
   @media (max-width: 600px) {
     .site-header {
       padding: 0 1rem;
+    }
+    .back-link {
+      display: none;
     }
     .header-tag {
       display: none;
