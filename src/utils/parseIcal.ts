@@ -2,7 +2,7 @@ import ICAL from 'ical.js';
 import { marked } from 'marked';
 
 /** Groupe de sortie déterminé par le jour de la semaine de l'événement */
-export type TypeGroupe = 'lundi' | 'mercredi' | 'tierce';
+export type TypeGroupe = 'lundi' | 'mercredi' | 'tierce' | 'deuxjours';
 
 export interface Sortie {
   id: string;
@@ -43,10 +43,20 @@ function parseAnnulation(titre: string): {
 
 /**
  * Détermine le groupe d'une sortie selon le jour de la semaine (fuseau Montréal).
+ * Événements de 2 jours ou plus (all-day) → 'deuxjours'
  * Lundi → 'lundi', Mercredi → 'mercredi', autre → 'tierce'
  */
-function getGroupe(dateStr: string, isAllDay: boolean): TypeGroupe {
+function getGroupe(dateStr: string, dateFinStr: string | null, isAllDay: boolean): TypeGroupe {
   if (isAllDay) {
+    // Événements de 2 jours ou plus : DTEND exclusif, donc diff >= 2 signifie ≥ 2 jours réels
+    if (dateFinStr) {
+      const [startYear, startMonth, startDay] = dateStr.split('-').map(Number);
+      const [endYear, endMonth, endDay] = dateFinStr.split('-').map(Number);
+      const startMs = new Date(startYear, startMonth - 1, startDay).getTime();
+      const endMs   = new Date(endYear, endMonth - 1, endDay).getTime();
+      const diffDays = (endMs - startMs) / (1000 * 60 * 60 * 24);
+      if (diffDays >= 2) return 'deuxjours';
+    }
     const [y, m, d] = dateStr.split('-').map(Number);
     const dow = new Date(y, m - 1, d).getDay(); // 0=dim … 6=sam
     if (dow === 1) return 'lundi';
@@ -125,7 +135,7 @@ export async function fetchAndParseSorties(icsUrl: string): Promise<Sortie[]> {
       : null;
 
     // Groupe basé sur le jour de la semaine (fuseau Montréal)
-    const groupe = getGroupe(dateDebut, isAllDay);
+    const groupe = getGroupe(dateDebut, dateFin, isAllDay);
 
     // Markdown → HTML (marked est synchrone par défaut)
     let descriptionHtml: string | null = null;
