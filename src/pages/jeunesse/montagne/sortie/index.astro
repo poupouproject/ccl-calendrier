@@ -1,0 +1,27 @@
+---
+import MainLayout from '@/layouts/MainLayout.astro';
+import SortiesJeunesse from '@/components/SortiesJeunesse.astro';
+import { fetchAndParseSorties, type Sortie } from '@/utils/parseIcal';
+import { siteConfig } from '@/config/siteConfig';
+
+const icsUrl = import.meta.env.GCAL_ICS_URL;
+const configured = Boolean(icsUrl);
+
+let sorties: Sortie[] = [];
+let error: string | null = null;
+
+if (configured) {
+  try {
+    sorties = await fetchAndParseSorties(icsUrl);
+  } catch (e) {
+    error = e instanceof Error ? e.message : 'Erreur inconnue lors du chargement du calendrier.';
+  }
+}
+---
+
+<MainLayout
+  title={`Sorties · ${siteConfig.program} · ${siteConfig.shortName}`}
+  description={siteConfig.description}
+>
+  <SortiesJeunesse sorties={sorties} error={error} configured={configured} />
+</MainLayout>

@@ -1,5 +1,5 @@
 ---
-import type { Sortie, TypeSortie } from '@/utils/parseIcal';
+import type { Sortie, TypeGroupe } from '@/utils/parseIcal';
 
 interface Props {
   sorties: Sortie[];
@@ -13,19 +13,15 @@ const { sorties, error, configured } = Astro.props;
 
 const now = new Date();
 const ONE_WEEK_MS = 7 * 24 * 60 * 60 * 1000;
+const MONTREAL_TZ = 'America/Montreal';
 
 function localDate(dateStr: string, isAllDay: boolean): Date {
   if (isAllDay) {
     const [y, m, d] = dateStr.split('-').map(Number);
     return new Date(y, m - 1, d);
   }
-  // Pour les événements avec heure, parser les composantes pour créer une Date locale
-  const match = dateStr.match(/(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})/);
-  if (match) {
-    const [, y, m, d, h, min, s] = match.map(Number);
-    return new Date(y, m - 1, d, h, min, s);
-  }
-  return new Date(dateStr); // fallback
+  // Pour les événements avec heure, dateStr est une chaîne ISO UTC
+  return new Date(dateStr);
 }
 
 type Status = 'upcoming' | 'today' | 'soon' | 'past' | 'annule';
@@ -33,11 +29,17 @@ type Status = 'upcoming' | 'today' | 'soon' | 'past' | 'annule';
 function getStatus(s: Sortie): Status {
   if (s.annule) return 'annule';
   const sortieDate = localDate(s.dateDebut, s.isAllDay);
-  const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-  const sortieDateOnly = new Date(sortieDate.getFullYear(), sortieDate.getMonth(), sortieDate.getDate());
-  
-  if (sortieDateOnly.getTime() === todayStart.getTime()) return 'today';
-  
+
+  // Comparaison "aujourd'hui" via le fuseau Montréal pour les événements temporisés
+  const sortieDayKey = s.isAllDay
+    ? `${sortieDate.getFullYear()}-${sortieDate.getMonth()}-${sortieDate.getDate()}`
+    : sortieDate.toLocaleDateString('en-CA', { timeZone: MONTREAL_TZ });
+  const todayKey = s.isAllDay
+    ? `${now.getFullYear()}-${now.getMonth()}-${now.getDate()}`
+    : now.toLocaleDateString('en-CA', { timeZone: MONTREAL_TZ });
+
+  if (sortieDayKey === todayKey) return 'today';
+
   const diff = sortieDate.getTime() - now.getTime();
   if (diff < 0) return 'past';
   if (diff < ONE_WEEK_MS) return 'soon';
@@ -52,18 +54,16 @@ const BADGE: Record<Status, { label: string; cls: string }> = {
   annule:   { label: 'Annulé',        cls: 'badge--annule'   },
 };
 
-const ACCENT_CLS: Record<TypeSortie, string> = {
-  regulier:  'accent--green',
-  intensif:  'accent--red',
-  evenement: 'accent--blue',
-  inconnu:   'accent--orange',
+const ACCENT_CLS: Record<TypeGroupe, string> = {
+  lundi:    'accent--blue',
+  mercredi: 'accent--green',
+  tierce:   'accent--orange',
 };
 
-const TYPE_LABEL: Record<TypeSortie, { label: string; cls: string }> = {
-  regulier:  { label: 'Régulier',      cls: 'type-tag--green'  },
-  intensif:  { label: 'Intensif',      cls: 'type-tag--red'    },
-  evenement: { label: 'Événement',     cls: 'type-tag--blue'   },
-  inconnu:   { label: 'Sortie',        cls: 'type-tag--orange' },
+const GROUPE_LABEL: Record<TypeGroupe, { label: string; cls: string }> = {
+  lundi:    { label: 'Groupe Lundi',    cls: 'type-tag--blue'   },
+  mercredi: { label: 'Groupe Mercredi', cls: 'type-tag--green'  },
+  tierce:   { label: 'Activité',        cls: 'type-tag--orange' },
 };
 
 function toHtmlId(uid: string): string {
@@ -72,60 +72,66 @@ function toHtmlId(uid: string): string {
 
 function formatCardDate(s: Sortie) {
   const d = localDate(s.dateDebut, s.isAllDay);
+  if (s.isAllDay) {
+    return {
+      day:     d.getDate(),
+      weekday: d.toLocaleString('fr-CA', { weekday: 'short' }),
+      monthYr: d.toLocaleString('fr-CA', { month: 'short', year: 'numeric' }),
+    };
+  }
+  const tz = MONTREAL_TZ;
   return {
-    day:      d.getDate(),
-    weekday:  d.toLocaleString('fr-CA', { weekday: 'short' }),
-    monthYr:  d.toLocaleString('fr-CA', { month: 'short', year: 'numeric' }),
+    day:     Number(d.toLocaleString('en-CA', { timeZone: tz, day: 'numeric' })),
+    weekday: d.toLocaleString('fr-CA', { timeZone: tz, weekday: 'short' }),
+    monthYr: d.toLocaleString('fr-CA', { timeZone: tz, month: 'short', year: 'numeric' }),
   };
 }
 
 function formatFullDate(s: Sortie): string {
   const start = localDate(s.dateDebut, s.isAllDay);
-  
+
   // Événements toute la journée : afficher seulement la date
   if (s.isAllDay) {
     const dateOpts: Intl.DateTimeFormatOptions = {
       weekday: 'long', day: 'numeric', month: 'long', year: 'numeric',
     };
     if (!s.dateFin) return start.toLocaleString('fr-CA', dateOpts);
-    
+
     const end = localDate(s.dateFin, s.isAllDay);
     // GCal all-day events: DTEND est exclusif → soustraire 1 jour
     end.setDate(end.getDate() - 1);
     if (end.toDateString() === start.toDateString()) return start.toLocaleString('fr-CA', dateOpts);
     return `${start.toLocaleString('fr-CA', dateOpts)} → ${end.toLocaleString('fr-CA', dateOpts)}`;
   }
-  
-  // Événements avec heure : afficher date + heures
+
+  // Événements avec heure : afficher date + heures (fuseau Montréal)
+  const tz = MONTREAL_TZ;
   const dateOpts: Intl.DateTimeFormatOptions = {
-    weekday: 'long', day: 'numeric', month: 'long', year: 'numeric',
+    weekday: 'long', day: 'numeric', month: 'long', year: 'numeric', timeZone: tz,
   };
   const timeOpts: Intl.DateTimeFormatOptions = {
-    hour: 'numeric', minute: '2-digit', hour12: false,
+    hour: 'numeric', minute: '2-digit', hour12: false, timeZone: tz,
   };
-  
+
   if (!s.dateFin) {
     return `${start.toLocaleString('fr-CA', dateOpts)}, ${start.toLocaleString('fr-CA', timeOpts)}`;
   }
-  
+
   const end = localDate(s.dateFin, s.isAllDay);
-  const isSameDay = 
-    start.getFullYear() === end.getFullYear() &&
-    start.getMonth() === end.getMonth() &&
-    start.getDate() === end.getDate();
-  
-  if (isSameDay) {
+  const startDay = start.toLocaleDateString('en-CA', { timeZone: tz });
+  const endDay   = end.toLocaleDateString('en-CA', { timeZone: tz });
+
+  if (startDay === endDay) {
     return `${start.toLocaleString('fr-CA', dateOpts)}, ${start.toLocaleString('fr-CA', timeOpts)} à ${end.toLocaleString('fr-CA', timeOpts)}`;
   }
-  
-  return `${start.toLocaleString('fr-CA', {...dateOpts, ...timeOpts})} → ${end.toLocaleString('fr-CA', {...dateOpts, ...timeOpts})}`;
+
+  return `${start.toLocaleString('fr-CA', { ...dateOpts, ...timeOpts })} → ${end.toLocaleString('fr-CA', { ...dateOpts, ...timeOpts })}`;
 }
 
 /** Extrait du texte brut pour la preview de la carte (max 180 caractères) */
 function makeExcerpt(description: string | null): string | null {
   if (!description) return null;
   const plain = description
-    .replace(/\[\s*type\s*:[^\]]+\]/gi, '')  // supprimer le tag [type:XXX]
     .replace(/^#{1,6}\s+/gm, '')
     .replace(/\*\*|__|`/g, '')
     .replace(/\[([^\]]+)\]\([^)]+\)/g, '$1')
@@ -143,17 +149,27 @@ const processed = sorties.map((s) => ({
   fullDate:  formatFullDate(s),
   cardDate:  formatCardDate(s),
   excerpt:   makeExcerpt(s.description),
-  accentCls: ACCENT_CLS[s.type],
+  accentCls: ACCENT_CLS[s.groupe],
   badge:     BADGE[getStatus(s)],
-  typeTag:   TYPE_LABEL[s.type],
+  groupeTag: GROUPE_LABEL[s.groupe],
 }));
 
-// Groupement par mois (clé "YYYY-MM" pour tri correct)
+// Groupement par mois (clé "YYYY-MM" pour tri correct, basé sur le fuseau Montréal)
 const grouped = new Map<string, { label: string; items: typeof processed }>();
 for (const s of processed) {
   const d = localDate(s.dateDebut, s.isAllDay);
-  const key = `${d.getFullYear()}-${String(d.getMonth()).padStart(2, '0')}`;
-  const label = d.toLocaleString('fr-CA', { month: 'long', year: 'numeric' });
+  let key: string;
+  let label: string;
+  if (s.isAllDay) {
+    key   = `${d.getFullYear()}-${String(d.getMonth()).padStart(2, '0')}`;
+    label = d.toLocaleString('fr-CA', { month: 'long', year: 'numeric' });
+  } else {
+    const tz = MONTREAL_TZ;
+    label = d.toLocaleString('fr-CA', { timeZone: tz, month: 'long', year: 'numeric' });
+    const monthNum = Number(d.toLocaleString('en-CA', { timeZone: tz, month: 'numeric' }));
+    const year     = Number(d.toLocaleString('en-CA', { timeZone: tz, year: 'numeric' }));
+    key = `${year}-${String(monthNum - 1).padStart(2, '0')}`;
+  }
   if (!grouped.has(key)) grouped.set(key, { label, items: [] });
   grouped.get(key)!.items.push(s);
 }
@@ -184,6 +200,15 @@ const soonCount     = processed.filter((s) => s.status === 'soon').length;
         <button class="chip active" data-filter="upcoming">À venir</button>
         <button class="chip" data-filter="all">Tout</button>
         <button class="chip" data-filter="past">Passées</button>
+      </div>
+    </div>
+    <div class="filter-group">
+      <span class="filter-label">Groupe</span>
+      <div class="filter-chips">
+        <button class="chip chip--group active" data-groupe="all">Tous</button>
+        <button class="chip chip--group" data-groupe="lundi">Lundi</button>
+        <button class="chip chip--group" data-groupe="deuxjours">2 jours</button>
+        <button class="chip chip--group" data-groupe="mercredi">Mercredi</button>
       </div>
     </div>
     <div class="search-wrap">
@@ -269,6 +294,7 @@ const soonCount     = processed.filter((s) => s.status === 'soon').length;
               <article
                 class:list={['event-card', s.annule && 'event-card--annule']}
                 data-status={s.status}
+                data-groupe={s.groupe}
                 data-search={`${s.titre} ${s.lieu ?? ''}`}
                 hidden={s.status === 'past'}
               >
@@ -324,7 +350,7 @@ const soonCount     = processed.filter((s) => s.status === 'soon').length;
 
                 <!-- Footer -->
                 <div class="card-footer">
-                  <span class:list={['type-tag', s.typeTag.cls]}>{s.typeTag.label}</span>
+                  <span class:list={['type-tag', s.groupeTag.cls]}>{s.groupeTag.label}</span>
                   <button
                     class="btn-details"
                     onclick={`document.getElementById('${s.htmlId}').showModal()`}
@@ -420,29 +446,40 @@ const soonCount     = processed.filter((s) => s.status === 'soon').length;
 
 <!-- ── Script : filtres + recherche ── -->
 <script>
-  const chips = document.querySelectorAll<HTMLButtonElement>('[data-filter]');
-  const searchInput = document.querySelector<HTMLInputElement>('#sortie-search');
-  const allCards = document.querySelectorAll<HTMLElement>('[data-status]');
+  const chips      = document.querySelectorAll<HTMLButtonElement>('[data-filter]');
+  const groupChips = document.querySelectorAll<HTMLButtonElement>('[data-groupe]');
+  const searchInput   = document.querySelector<HTMLInputElement>('#sortie-search');
+  const allCards      = document.querySelectorAll<HTMLElement>('[data-status]');
   const monthSections = document.querySelectorAll<HTMLElement>('[data-month]');
-  const emptyState = document.getElementById('empty-state');
+  const emptyState    = document.getElementById('empty-state');
 
   let activeFilter = 'upcoming';
+  let activeGroupe = 'all';
 
   function applyFilters() {
     const query = searchInput?.value.toLowerCase().trim() ?? '';
     let visibleCount = 0;
 
     for (const card of allCards) {
-      const status = card.dataset.status ?? '';
+      const status  = card.dataset.status ?? '';
+      const groupe  = card.dataset.groupe ?? '';
       const searchable = (card.dataset.search ?? '').toLowerCase();
 
-      const matchesFilter =
+      const matchesPeriod =
         activeFilter === 'all' ||
         (activeFilter === 'upcoming' && (status === 'upcoming' || status === 'today' || status === 'soon')) ||
-        (activeFilter === 'past' && (status === 'past' || status === 'annule'));
+        (activeFilter === 'past'     && (status === 'past' || status === 'annule'));
+
+      // Les activités tierces (autres jours) sont pour tous les groupes
+      const matchesGroupe =
+        activeGroupe === 'all'      ||
+        groupe === 'tierce'         ||
+        (activeGroupe === 'lundi'     && groupe === 'lundi')    ||
+        (activeGroupe === 'deuxjours' && (groupe === 'lundi' || groupe === 'mercredi')) ||
+        (activeGroupe === 'mercredi'  && groupe === 'mercredi');
 
       const matchesSearch = !query || searchable.includes(query);
-      const visible = matchesFilter && matchesSearch;
+      const visible = matchesPeriod && matchesGroupe && matchesSearch;
 
       card.hidden = !visible;
       if (visible) visibleCount++;
@@ -457,12 +494,22 @@ const soonCount     = processed.filter((s) => s.status === 'soon').length;
     if (emptyState) emptyState.hidden = visibleCount > 0;
   }
 
-  // Chips de filtre
+  // Chips de période
   for (const chip of chips) {
     chip.addEventListener('click', () => {
       chips.forEach((c) => c.classList.remove('active'));
       chip.classList.add('active');
       activeFilter = chip.dataset.filter ?? 'upcoming';
+      applyFilters();
+    });
+  }
+
+  // Chips de groupe
+  for (const chip of groupChips) {
+    chip.addEventListener('click', () => {
+      groupChips.forEach((c) => c.classList.remove('active'));
+      chip.classList.add('active');
+      activeGroupe = chip.dataset.groupe ?? 'all';
       applyFilters();
     });
   }

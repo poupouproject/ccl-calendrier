@@ -1,16 +1,17 @@
 import ICAL from 'ical.js';
 import { marked } from 'marked';
 
-export type TypeSortie = 'regulier' | 'intensif' | 'evenement' | 'inconnu';
+/** Groupe de sortie déterminé par le jour de la semaine de l'événement */
+export type TypeGroupe = 'lundi' | 'mercredi' | 'tierce';
 
 export interface Sortie {
   id: string;
   titre: string;
   titreOriginal: string;
-  type: TypeSortie;
+  groupe: TypeGroupe;
   annule: boolean;
   raisonAnnulation: string | null;
-  /** "YYYY-MM-DD" pour les événements full-day, ISO 8601 pour les événements avec heure */
+  /** "YYYY-MM-DD" pour les événements full-day, ISO 8601 UTC pour les événements avec heure */
   dateDebut: string;
   dateFin: string | null;
   isAllDay: boolean;
@@ -22,21 +23,9 @@ export interface Sortie {
   urlGcal: string | null;
 }
 
-/** Couleurs Google Calendar → type de sortie */
-const COLOR_TO_TYPE: Record<string, TypeSortie> = {
-  sage:       'regulier',
-  green:      'regulier',
-  basil:      'regulier',
-  tomato:     'intensif',
-  flamingo:   'intensif',
-  tangerine:  'intensif',
-  blueberry:  'evenement',
-  peacock:    'evenement',
-  lavender:   'evenement',
-};
+const MONTREAL_TZ = 'America/Montreal';
 
 const ANNULE_REGEX = /^\[ANNULÉ(?:\s*[-–]\s*([^\]]+))?\]\s*/i;
-const TYPE_REGEX = /\[\s*type\s*:\s*(regulier|intensif|evenement)\s*\]/i;
 
 function parseAnnulation(titre: string): {
   annule: boolean;
@@ -52,25 +41,26 @@ function parseAnnulation(titre: string): {
   };
 }
 
-/** Extrait le type de sortie depuis un tag [type:XXX] dans la description */
-function extractTypeFromDescription(description: string | null): TypeSortie | null {
-  if (!description) return null;
-  
-  const match = description.match(TYPE_REGEX);
-  if (!match) return null;
-  
-  // match[0] = le tag entier ex: "[type:intensif]"
-  // match[1] = le type capturé ex: "intensif"
-  const typeStr = match[1]?.toLowerCase();
-  
-  if (!typeStr) return null;
-  
-  // Valider que c'est bien un des types connus
-  if (typeStr === 'regulier' || typeStr === 'intensif' || typeStr === 'evenement') {
-    return typeStr as TypeSortie;
+/**
+ * Détermine le groupe d'une sortie selon le jour de la semaine (fuseau Montréal).
+ * Lundi → 'lundi', Mercredi → 'mercredi', autre → 'tierce'
+ */
+function getGroupe(dateStr: string, isAllDay: boolean): TypeGroupe {
+  if (isAllDay) {
+    const [y, m, d] = dateStr.split('-').map(Number);
+    const dow = new Date(y, m - 1, d).getDay(); // 0=dim … 6=sam
+    if (dow === 1) return 'lundi';
+    if (dow === 3) return 'mercredi';
+    return 'tierce';
   }
-  
-  return null;
+  // Pour les événements avec heure, le dateStr est une chaîne ISO UTC
+  const dow = new Intl.DateTimeFormat('en', {
+    timeZone: MONTREAL_TZ,
+    weekday: 'short',
+  }).format(new Date(dateStr)); // 'Mon', 'Tue', 'Wed', …
+  if (dow === 'Mon') return 'lundi';
+  if (dow === 'Wed') return 'mercredi';
+  return 'tierce';
 }
 
 /**
@@ -114,21 +104,6 @@ export async function fetchAndParseSorties(icsUrl: string): Promise<Sortie[]> {
     const urlGcal =
       (vevent.getFirstPropertyValue('url') as string | null) ?? null;
 
-    // Type de sortie : chercher d'abord un tag [type:XXX] dans la description
-    // Fallback : couleur GCal (si disponible), puis défaut à 'regulier'
-    let type: TypeSortie = 'regulier';
-    const typeFromDesc = extractTypeFromDescription(descriptionRaw);
-    if (typeFromDesc) {
-      type = typeFromDesc;
-    } else {
-      const colorRaw = (
-        (vevent.getFirstPropertyValue('color') as string | null) ?? ''
-      ).toLowerCase();
-      if (colorRaw && COLOR_TO_TYPE[colorRaw]) {
-        type = COLOR_TO_TYPE[colorRaw];
-      }
-    }
-
     // Annulation
     const { annule, raison, titreNettoye } = parseAnnulation(titreOriginal);
 
@@ -137,33 +112,32 @@ export async function fetchAndParseSorties(icsUrl: string): Promise<Sortie[]> {
     const endTime = event.endDate;
     const isAllDay = startTime.isDate;
 
-    // Pour les événements avec heure, extraire les composantes locales du calendrier
-    // au lieu de convertir en UTC avec toISOString()
+    // Pour les événements avec heure, convertir en ISO UTC via toJSDate() pour
+    // garantir un affichage correct quel que soit le fuseau du serveur (Vercel = UTC).
     const dateDebut = isAllDay
-      ? startTime.toString()  // "YYYY-MM-DD"
-      : `${startTime.year}-${String(startTime.month).padStart(2, '0')}-${String(startTime.day).padStart(2, '0')}T${String(startTime.hour).padStart(2, '0')}:${String(startTime.minute).padStart(2, '0')}:00`;
+      ? startTime.toString()          // "YYYY-MM-DD"
+      : startTime.toJSDate().toISOString();  // "YYYY-MM-DDTHH:MM:SS.sssZ"
 
     const dateFin = endTime
       ? isAllDay
         ? endTime.toString()
-        : `${endTime.year}-${String(endTime.month).padStart(2, '0')}-${String(endTime.day).padStart(2, '0')}T${String(endTime.hour).padStart(2, '0')}:${String(endTime.minute).padStart(2, '0')}:00`
+        : endTime.toJSDate().toISOString()
       : null;
 
+    // Groupe basé sur le jour de la semaine (fuseau Montréal)
+    const groupe = getGroupe(dateDebut, isAllDay);
+
     // Markdown → HTML (marked est synchrone par défaut)
-    // Nettoyer les tags métadonnées ([type:XXX]) avant rendu
     let descriptionHtml: string | null = null;
     if (descriptionRaw) {
-      const cleanedDesc = descriptionRaw.replace(TYPE_REGEX, '').trim();
-      if (cleanedDesc) {
-        descriptionHtml = String(marked.parse(cleanedDesc));
-      }
+      descriptionHtml = String(marked.parse(descriptionRaw));
     }
 
     sorties.push({
       id: uid,
       titre: titreNettoye,
       titreOriginal,
-      type,
+      groupe,
       annule,
       raisonAnnulation: raison,
       dateDebut,
@@ -189,11 +163,6 @@ function toTimestamp(dateStr: string, isAllDay: boolean): number {
     const [y, m, d] = dateStr.split('-').map(Number);
     return new Date(y, m - 1, d).getTime();
   }
-  // Parser les composantes de date/heure locale
-  const match = dateStr.match(/(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})/);
-  if (match) {
-    const [, y, m, d, h, min, s] = match.map(Number);
-    return new Date(y, m - 1, d, h, min, s).getTime();
-  }
-  return new Date(dateStr).getTime(); // fallback
+  // Pour les événements avec heure, dateStr est une chaîne ISO UTC
+  return new Date(dateStr).getTime();
 }
