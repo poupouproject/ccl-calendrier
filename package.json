@@ -17,6 +17,7 @@
     "marked": "^15.0.12"
   },
   "devDependencies": {
+    "@playwright/test": "^1.60.0",
     "typescript": "^5.9.3"
   }
 }

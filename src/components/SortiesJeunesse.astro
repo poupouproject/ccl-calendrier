@@ -208,8 +208,8 @@ const soonCount     = processed.filter((s) => s.status === 'soon').length;
       <span class="filter-label">Groupe</span>
       <div class="filter-chips">
         <button class="chip chip--group active" data-groupe="all">Tous</button>
-        <button class="chip chip--group" data-groupe="lundi">Lundi</button>
-        <button class="chip chip--group" data-groupe="mercredi">Mercredi</button>
+        <button class="chip chip--group" data-groupe="lundi">Lundi &amp; 2 jours</button>
+        <button class="chip chip--group" data-groupe="mercredi">Mercredi &amp; 2 jours</button>
       </div>
     </div>
     <div class="search-wrap">
@@ -471,10 +471,10 @@ const soonCount     = processed.filter((s) => s.status === 'soon').length;
         (activeFilter === 'upcoming' && (status === 'upcoming' || status === 'today' || status === 'soon')) ||
         (activeFilter === 'past'     && (status === 'past' || status === 'annule'));
 
-      // Lundi = lundi + deuxjours ; Mercredi = mercredi + deuxjours ; tierce visible partout
+      // Lundi = lundi + deuxjours ; Mercredi = mercredi + deuxjours
+      // tierce n'est visible qu'avec le filtre "Tous"
       const matchesGroupe =
-        activeGroupe === 'all'     ||
-        groupe === 'tierce'        ||
+        activeGroupe === 'all' ||
         (activeGroupe === 'lundi'    && (groupe === 'lundi'    || groupe === 'deuxjours')) ||
         (activeGroupe === 'mercredi' && (groupe === 'mercredi' || groupe === 'deuxjours'));
 
