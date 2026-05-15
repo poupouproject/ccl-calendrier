@@ -16,7 +16,7 @@ export interface Sortie {
   dateFin: string | null;
   isAllDay: boolean;
   lieu: string | null;
-  /** Description brute (Markdown) */
+  /** Description brute (Markdown ou HTML selon la source) */
   description: string | null;
   /** Description rendue en HTML */
   descriptionHtml: string | null;
@@ -137,10 +137,17 @@ export async function fetchAndParseSorties(icsUrl: string): Promise<Sortie[]> {
     // Groupe basé sur le jour de la semaine (fuseau Montréal)
     const groupe = getGroupe(dateDebut, dateFin, isAllDay);
 
-    // Markdown → HTML (marked est synchrone par défaut)
+    // Markdown → HTML ou HTML passthrough selon le contenu
+    // Si la description contient déjà des balises HTML bloc, on l'utilise directement.
+    // Sinon, on passe par marked (Markdown → HTML).
+    const HTML_TAGS_RE = /<(p|div|br|ul|ol|li|b|i|strong|em|a|h[1-6]|span)\b/i;
     let descriptionHtml: string | null = null;
     if (descriptionRaw) {
-      descriptionHtml = String(marked.parse(descriptionRaw));
+      if (HTML_TAGS_RE.test(descriptionRaw)) {
+        descriptionHtml = descriptionRaw;
+      } else {
+        descriptionHtml = String(marked.parse(descriptionRaw));
+      }
     }
 
     sorties.push({

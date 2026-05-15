@@ -164,10 +164,12 @@ function formatFullDate(s: Sortie): string {
 function makeExcerpt(description: string | null): string | null {
   if (!description) return null;
   const plain = description
-    .replace(/^#{1,6}\s+/gm, '')
-    .replace(/\*\*|__|`/g, '')
-    .replace(/\[([^\]]+)\]\([^)]+\)/g, '$1')
-    .replace(/\n+/g, ' ')
+    .replace(/<[^>]+>/g, ' ')          // balises HTML
+    .replace(/^#{1,6}\s+/gm, '')       // titres Markdown
+    .replace(/\*\*|__|`/g, '')         // gras / code Markdown
+    .replace(/\[([^\]]+)\]\([^)]+\)/g, '$1') // liens Markdown
+    .replace(/&[a-z]+;/gi, ' ')        // entités HTML (&amp; &nbsp; etc.)
+    .replace(/\s+/g, ' ')
     .trim();
   return plain.length > 180 ? plain.slice(0, 177) + '…' : plain;
 }
