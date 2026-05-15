@@ -55,15 +55,17 @@ const BADGE: Record<Status, { label: string; cls: string }> = {
 };
 
 const ACCENT_CLS: Record<TypeGroupe, string> = {
-  lundi:    'accent--blue',
-  mercredi: 'accent--green',
-  tierce:   'accent--orange',
+  lundi:     'accent--blue',
+  mercredi:  'accent--green',
+  tierce:    'accent--orange',
+  deuxjours: 'accent--yellow',
 };
 
 const GROUPE_LABEL: Record<TypeGroupe, { label: string; cls: string }> = {
-  lundi:    { label: 'Groupe Lundi',    cls: 'type-tag--blue'   },
-  mercredi: { label: 'Groupe Mercredi', cls: 'type-tag--green'  },
-  tierce:   { label: 'Activité',        cls: 'type-tag--orange' },
+  lundi:     { label: 'Groupe Lundi',    cls: 'type-tag--blue'   },
+  mercredi:  { label: 'Groupe Mercredi', cls: 'type-tag--green'  },
+  tierce:    { label: 'Activité',        cls: 'type-tag--orange' },
+  deuxjours: { label: 'Groupe 2 jours',  cls: 'type-tag--yellow' },
 };
 
 function toHtmlId(uid: string): string {
@@ -205,9 +207,8 @@ const soonCount     = processed.filter((s) => s.status === 'soon').length;
     <div class="filter-group">
       <span class="filter-label">Groupe</span>
       <div class="filter-chips">
-        <button class="chip chip--group active" data-groupe="all">Tous</button>
+        <button class="chip chip--group active" data-groupe="all">2 jours</button>
         <button class="chip chip--group" data-groupe="lundi">Lundi</button>
-        <button class="chip chip--group" data-groupe="deuxjours">2 jours</button>
         <button class="chip chip--group" data-groupe="mercredi">Mercredi</button>
       </div>
     </div>
@@ -447,7 +448,7 @@ const soonCount     = processed.filter((s) => s.status === 'soon').length;
 <!-- ── Script : filtres + recherche ── -->
 <script>
   const chips      = document.querySelectorAll<HTMLButtonElement>('[data-filter]');
-  const groupChips = document.querySelectorAll<HTMLButtonElement>('[data-groupe]');
+  const groupChips = document.querySelectorAll<HTMLButtonElement>('button[data-groupe]');
   const searchInput   = document.querySelector<HTMLInputElement>('#sortie-search');
   const allCards      = document.querySelectorAll<HTMLElement>('[data-status]');
   const monthSections = document.querySelectorAll<HTMLElement>('[data-month]');
@@ -470,13 +471,12 @@ const soonCount     = processed.filter((s) => s.status === 'soon').length;
         (activeFilter === 'upcoming' && (status === 'upcoming' || status === 'today' || status === 'soon')) ||
         (activeFilter === 'past'     && (status === 'past' || status === 'annule'));
 
-      // Les activités tierces (autres jours) sont pour tous les groupes
+      // Lundi = lundi + deuxjours ; Mercredi = mercredi + deuxjours
+      // tierce n'est visible qu'avec le filtre "Tous"
       const matchesGroupe =
-        activeGroupe === 'all'      ||
-        groupe === 'tierce'         ||
-        (activeGroupe === 'lundi'     && groupe === 'lundi')    ||
-        (activeGroupe === 'deuxjours' && (groupe === 'lundi' || groupe === 'mercredi')) ||
-        (activeGroupe === 'mercredi'  && groupe === 'mercredi');
+        activeGroupe === 'all' ||
+        (activeGroupe === 'lundi'    && (groupe === 'lundi'    || groupe === 'deuxjours')) ||
+        (activeGroupe === 'mercredi' && (groupe === 'mercredi' || groupe === 'deuxjours'));
 
       const matchesSearch = !query || searchable.includes(query);
       const visible = matchesPeriod && matchesGroupe && matchesSearch;
@@ -532,7 +532,7 @@ const soonCount     = processed.filter((s) => s.status === 'soon').length;
   /* ── Hero ── */
   .hero {
     background: linear-gradient(135deg, #0d1117 0%, #1a1f2e 50%, #0f1620 100%);
-    padding: 3rem 2rem 2.5rem;
+    padding: 3rem 0 2.5rem;
     position: relative;
     overflow: hidden;
   }
@@ -549,6 +549,7 @@ const soonCount     = processed.filter((s) => s.status === 'soon').length;
   .hero-inner {
     max-width: 960px;
     margin: 0 auto;
+    padding: 0 2rem;
     position: relative;
     z-index: 1;
   }
@@ -833,6 +834,7 @@ const soonCount     = processed.filter((s) => s.status === 'soon').length;
   .accent--red     { background: var(--red); }
   .accent--blue    { background: var(--blue); }
   .accent--orange  { background: var(--orange); }
+  .accent--yellow  { background: var(--yellow); }
 
   .card-body { padding: 1.1rem; flex: 1; }
 
@@ -994,6 +996,7 @@ const soonCount     = processed.filter((s) => s.status === 'soon').length;
   .type-tag--red    { color: var(--red);    background: rgba(255, 59, 48, 0.12); }
   .type-tag--blue   { color: var(--blue);   background: rgba(64, 160, 255, 0.12); }
   .type-tag--orange { color: var(--orange); background: rgba(255, 92, 26, 0.12); }
+  .type-tag--yellow { color: var(--yellow); background: rgba(255, 208, 0, 0.12); }
 
   /* ── État vide ── */
   .state-box {
@@ -1017,7 +1020,8 @@ const soonCount     = processed.filter((s) => s.status === 'soon').length;
 
   /* ── Responsive ── */
   @media (max-width: 600px) {
-    .hero { padding: 2rem 1rem 2rem; }
+    .hero { padding: 2rem 0 2rem; }
+    .hero-inner { padding: 0 1rem; }
     .controls { padding: 0 1rem; }
     .banner { padding-inline: 1rem; }
     .main { padding: 0 1rem 3rem; }
