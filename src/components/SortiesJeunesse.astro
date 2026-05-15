@@ -47,12 +47,30 @@ function getStatus(s: Sortie): Status {
 }
 
 const BADGE: Record<Status, { label: string; cls: string }> = {
-  upcoming: { label: 'À venir',       cls: 'badge--upcoming' },
-  today:    { label: 'Aujourd\'hui',  cls: 'badge--today'    },
-  soon:     { label: 'Cette semaine', cls: 'badge--soon'     },
-  past:     { label: 'Passée',        cls: 'badge--past'     },
-  annule:   { label: 'Annulé',        cls: 'badge--annule'   },
+  upcoming: { label: 'À venir',      cls: 'badge--upcoming' },
+  today:    { label: 'Aujourd\'hui', cls: 'badge--today'    },
+  soon:     { label: 'Bientôt',      cls: 'badge--soon'     },
+  past:     { label: 'Passée',       cls: 'badge--past'     },
+  annule:   { label: 'Annulé',       cls: 'badge--annule'   },
 };
+
+/** Label de badge dynamique : pour 'soon', indique le délai en jours calendaires (fuseau Montréal) */
+function getRelativeBadgeLabel(s: Sortie, status: Status): string {
+  if (status !== 'soon') return BADGE[status].label;
+  const tz = MONTREAL_TZ;
+  const sortieDay = s.isAllDay
+    ? s.dateDebut
+    : localDate(s.dateDebut, false).toLocaleDateString('en-CA', { timeZone: tz });
+  const todayDay = now.toLocaleDateString('en-CA', { timeZone: tz });
+  const [sy, sm, sd] = sortieDay.split('-').map(Number);
+  const [ty, tm, td] = todayDay.split('-').map(Number);
+  const diffDays = Math.round(
+    (new Date(sy, sm - 1, sd).getTime() - new Date(ty, tm - 1, td).getTime()) /
+    (1000 * 60 * 60 * 24)
+  );
+  if (diffDays <= 1) return 'Demain';
+  return `Dans ${diffDays} jours`;
+}
 
 const ACCENT_CLS: Record<TypeGroupe, string> = {
   lundi:     'accent--blue',
@@ -87,6 +105,18 @@ function formatCardDate(s: Sortie) {
     weekday: d.toLocaleString('fr-CA', { timeZone: tz, weekday: 'short' }),
     monthYr: d.toLocaleString('fr-CA', { timeZone: tz, month: 'short', year: 'numeric' }),
   };
+}
+
+/** Heure de début pour les événements temporisés (fuseau Montréal), null pour les événements toute la journée */
+function formatCardTime(s: Sortie): string | null {
+  if (s.isAllDay) return null;
+  const d = localDate(s.dateDebut, false);
+  return d.toLocaleString('fr-CA', {
+    timeZone: MONTREAL_TZ,
+    hour: 'numeric',
+    minute: '2-digit',
+    hour12: false,
+  });
 }
 
 function formatFullDate(s: Sortie): string {
@@ -144,17 +174,22 @@ function makeExcerpt(description: string | null): string | null {
 
 // ── Traitement des sorties ─────────────────────────────────────────────────
 
-const processed = sorties.map((s) => ({
-  ...s,
-  status:    getStatus(s),
-  htmlId:    toHtmlId(s.id),
-  fullDate:  formatFullDate(s),
-  cardDate:  formatCardDate(s),
-  excerpt:   makeExcerpt(s.description),
-  accentCls: ACCENT_CLS[s.groupe],
-  badge:     BADGE[getStatus(s)],
-  groupeTag: GROUPE_LABEL[s.groupe],
-}));
+const processed = sorties.map((s) => {
+  const status = getStatus(s);
+  return {
+    ...s,
+    status,
+    htmlId:    toHtmlId(s.id),
+    fullDate:  formatFullDate(s),
+    cardDate:  formatCardDate(s),
+    cardTime:  formatCardTime(s),
+    excerpt:   makeExcerpt(s.description),
+    accentCls: ACCENT_CLS[s.groupe],
+    badge:     { cls: BADGE[status].cls, label: getRelativeBadgeLabel(s, status) },
+    groupeTag: GROUPE_LABEL[s.groupe],
+    mapsUrl:   s.lieu ? `https://maps.google.com/maps?q=${encodeURIComponent(s.lieu)}` : null,
+  };
+});
 
 // Groupement par mois (clé "YYYY-MM" pour tri correct, basé sur le fuseau Montréal)
 const grouped = new Map<string, { label: string; items: typeof processed }>();
@@ -312,6 +347,7 @@ const soonCount     = processed.filter((s) => s.status === 'soon').length;
                       <div class="date-detail">
                         <div class="date-weekday">{s.cardDate.weekday}</div>
                         <div class="date-month-year">{s.cardDate.monthYr}</div>
+                        {s.cardTime && <div class="date-time">{s.cardTime}</div>}
                       </div>
                     </div>
                     <span class:list={['badge', s.badge.cls]}>{s.badge.label}</span>
@@ -343,7 +379,10 @@ const soonCount     = processed.filter((s) => s.status === 'soon').length;
                           <path d="M21 10c0 7-9 13-9 13S3 17 3 10a9 9 0 0 1 18 0z"/>
                           <circle cx="12" cy="10" r="3"/>
                         </svg>
-                        <span>{s.lieu}</span>
+                        {s.mapsUrl
+                          ? <a href={s.mapsUrl} class="meta-link" target="_blank" rel="noopener noreferrer">{s.lieu}</a>
+                          : <span>{s.lieu}</span>
+                        }
                       </div>
                     )}
                   </div>
@@ -412,7 +451,12 @@ const soonCount     = processed.filter((s) => s.status === 'soon').length;
       {s.lieu && (
         <div class="dialog-section">
           <div class="dialog-section-label">Lieu</div>
-          <div class="dialog-section-content">{s.lieu}</div>
+          <div class="dialog-section-content">
+            {s.mapsUrl
+              ? <a href={s.mapsUrl} target="_blank" rel="noopener noreferrer" class="dialog-link">{s.lieu}</a>
+              : s.lieu
+            }
+          </div>
         </div>
       )}
 
@@ -471,10 +515,11 @@ const soonCount     = processed.filter((s) => s.status === 'soon').length;
         (activeFilter === 'upcoming' && (status === 'upcoming' || status === 'today' || status === 'soon')) ||
         (activeFilter === 'past'     && (status === 'past' || status === 'annule'));
 
-      // Lundi = lundi + deuxjours ; Mercredi = mercredi + deuxjours
-      // tierce n'est visible qu'avec le filtre "Tous"
+      // tierce (Activité) toujours visible quel que soit le filtre de groupe
+      // "2 jours" = deuxjours ; Lundi = lundi + deuxjours ; Mercredi = mercredi + deuxjours
       const matchesGroupe =
-        activeGroupe === 'all' ||
+        groupe === 'tierce' ||
+        (activeGroupe === 'all'      && (groupe === 'deuxjours' || groupe === 'lundi' || groupe === 'mercredi')) ||
         (activeGroupe === 'lundi'    && (groupe === 'lundi'    || groupe === 'deuxjours')) ||
         (activeGroupe === 'mercredi' && (groupe === 'mercredi' || groupe === 'deuxjours'));
 
@@ -877,6 +922,13 @@ const soonCount     = processed.filter((s) => s.status === 'soon').length;
     color: var(--text);
   }
 
+  .date-time {
+    font-size: 0.75rem;
+    font-weight: 700;
+    color: var(--orange);
+    letter-spacing: 0.04em;
+  }
+
   /* Badges */
   .badge {
     font-size: 0.65rem;
@@ -946,6 +998,15 @@ const soonCount     = processed.filter((s) => s.status === 'soon').length;
   }
 
   .meta-row svg { flex-shrink: 0; color: var(--orange); opacity: 0.8; }
+
+  .meta-link {
+    color: inherit;
+    text-decoration: underline;
+    text-decoration-color: rgba(138, 149, 168, 0.4);
+    text-underline-offset: 2px;
+    transition: color 0.15s;
+  }
+  .meta-link:hover { color: var(--text); }
 
   .card-footer {
     padding: 0.75rem 1.1rem;
@@ -1119,6 +1180,12 @@ const soonCount     = processed.filter((s) => s.status === 'soon').length;
     color: var(--text-muted);
     line-height: 1.6;
   }
+
+  .dialog-link {
+    color: var(--orange);
+    text-decoration: none;
+  }
+  .dialog-link:hover { text-decoration: underline; }
 
   /* Rendu Markdown dans la description */
   .dialog-description {
