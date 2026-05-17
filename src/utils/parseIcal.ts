@@ -237,6 +237,9 @@ export async function fetchAndParseSorties(icsUrl: string): Promise<Sortie[]> {
     // Si la description contient déjà des balises HTML bloc, on l'utilise directement.
     // Sinon, on passe par marked (Markdown → HTML).
     const HTML_TAGS_RE = /<(p|div|br|ul|ol|li|b|i|strong|em|a|h[1-6]|span)\b/i;
+    // Remplace les liens pointant vers une image par un <img> :
+    // <a href="https://...image.png">...</a>  →  <img src="https://...image.png" alt="image.png" />
+    const IMAGE_LINK_RE = /<a\b[^>]*\bhref="(https?:\/\/[^"]+\.(?:png|jpe?g|gif|webp))"[^>]*>.*?<\/a>/gi;
     let descriptionHtml: string | null = null;
     if (descriptionRaw) {
       if (HTML_TAGS_RE.test(descriptionRaw)) {
@@ -244,6 +247,19 @@ export async function fetchAndParseSorties(icsUrl: string): Promise<Sortie[]> {
       } else {
         descriptionHtml = String(marked.parse(descriptionRaw));
       }
+      // Transformation 1 : liens images → <img>
+      descriptionHtml = descriptionHtml!.replace(IMAGE_LINK_RE, (_, src: string) => {
+        const alt = src.split('/').pop() ?? 'image';
+        return `<img src="${src}" alt="${alt}" style="max-width:100%;height:auto;border-radius:6px;" />`;
+      });
+      // Transformation 2 : nettoyer les <br> parasites dans les listes HTML
+      // Google Calendar insère souvent <ul><br><li><br>Texte</li><br></ul> → créer des lignes vides
+      descriptionHtml = descriptionHtml
+        .replace(/(<ul>|<ol>)\s*<br\s*\/?>\s*/gi, '$1')         // après <ul> ou <ol>
+        .replace(/\s*<br\s*\/?>\s*(<\/ul>|<\/ol>)/gi, '$1')     // avant </ul> ou </ol>
+        .replace(/(<li>)\s*<br\s*\/?>\s*/gi, '$1')              // après <li>
+        .replace(/\s*<br\s*\/?>\s*(<\/li>)/gi, '$1')            // avant </li>
+        .replace(/(<br\s*\/?>){3,}/gi, '<br><br>');             // max 2 <br> consécutifs
     }
 
     sorties.push({
