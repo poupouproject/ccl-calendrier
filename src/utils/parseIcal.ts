@@ -88,9 +88,37 @@ export async function fetchAndParseSorties(icsUrl: string): Promise<Sortie[]> {
   const comp = new ICAL.Component(jcal);
   const vevents = comp.getAllSubcomponents('vevent');
 
+  // Dédoublonnage par UID : conserver uniquement le VEVENT avec le SEQUENCE le plus élevé.
+  // Google Calendar conserve un VEVENT STATUS:CANCELLED lorsqu'un événement est supprimé ;
+  // ce VEVENT gagne la déduplication s'il a le SEQUENCE le plus élevé, puis est filtré ci-dessous.
+  // Les VEVENTs sans UID sont conservés tels quels (aucun dédoublonnage possible).
+  const dedupMap = new Map<string, { vevent: ICAL.Component; sequence: number }>();
+  const noUidVevents: ICAL.Component[] = [];
+  for (const vevent of vevents) {
+    const uid = vevent.getFirstPropertyValue('uid') as string | null;
+    if (!uid) {
+      noUidVevents.push(vevent);
+      continue;
+    }
+    const sequence = (vevent.getFirstPropertyValue('sequence') as number | null) ?? 0;
+    const existing = dedupMap.get(uid);
+    if (!existing || sequence > existing.sequence) {
+      dedupMap.set(uid, { vevent, sequence });
+    }
+  }
+
   const sorties: Sortie[] = [];
 
-  for (const vevent of vevents) {
+  const dedupedVevents = [
+    ...[...dedupMap.values()].map((e) => e.vevent),
+    ...noUidVevents,
+  ];
+
+  for (const vevent of dedupedVevents) {
+    // Ignorer les événements supprimés dans Google Calendar (STATUS:CANCELLED au niveau iCal)
+    const icalStatus = (vevent.getFirstPropertyValue('status') as string | null)?.toUpperCase();
+    if (icalStatus === 'CANCELLED') continue;
+
     const event = new ICAL.Event(vevent);
 
     // Identifiant unique
