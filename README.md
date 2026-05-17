@@ -66,42 +66,57 @@ npm run dev
 
 ## Convention éditoriale
 
-| Action | Dans Google Calendar |
-|---|---|
-| Créer une sortie | Nouvel événement + ajouter un tag dans la description |
-| Spécifier le type | Ajouter `[type:regulier]`, `[type:intensif]` ou `[type:evenement]` dans la description |
-| Annuler | Préfixer le titre : `[ANNULÉ]` ou `[ANNULÉ - Météo]` |
-| Modifier | Modifier l'événement → visible au prochain chargement |
+Le site synchronise automatiquement tous les événements du calendrier Google Calendar public. Aucune configuration manuelle requise.
 
-### Exemple : entraînement intensif
+### Groupes (automatiques basés sur le jour)
 
-**Titre :** `Entraînement technique — Virages serrés`  
-**Description :**
-```
-[type:intensif]
+Les événements sont classés par **jour de la semaine** du fuseau Montréal :
 
-Atelier de 2h axé sur la technique de freinage et la négociation des virages serrés en single track.
-
-## Ce qu'il faut apporter
-- Casque intégral recommandé
-- Eau (1.5L minimum)
-- Gants
-```
-
-Le tag `[type:intensif]` :
-- Définit la couleur d'accent de la carte (rouge)
-- N'apparaît pas sur le site (auto-supprimé)
-- Fonctionne indépendamment de la couleur GCal (flux `.ics` public n'inclut pas les couleurs)
-
-### Types disponibles
-
-| Tag | Couleur d'accent | Utilité |
+| Jour | Groupe | Badge |
 |---|---|---|
-| `[type:regulier]` | Vert | Sorties régulières pour tous |
-| `[type:intensif]` | Rouge | Entraînement ciblé / difficile |
-| `[type:evenement]` | Bleu | Événements externes / occasionnels |
+| Lundi | `lundi` | Bleu |
+| Mercredi | `mercredi` | Vert |
+| Autres (mardi, jeudi, vendredi, etc.) | `tierce` | Orange |
+| Événement 2+ jours | `deuxjours` | Jaune |
 
-*Si aucun tag n'est spécifié, le type par défaut est `regulier` (vert).*
+Les groupes s'affichent en filtres dans l'interface pour organiser les sorties.
+
+### Annuler une sortie
+
+Pour annuler un événement, **préfixer le titre** dans Google Calendar :
+- `[ANNULÉ]` — annulation simple
+- `[ANNULÉ - Météo]` — avec raison (affichée dans les détails)
+
+L'événement reste visible dans le calendrier avec un badge **Annulé** et un style barré.
+
+### Images dans la description
+
+Les liens vers des images (`.png`, `.jpg`, `.jpeg`, `.gif`, `.webp`) sont **automatiquement convertis** en balises `<img>` :
+
+```html
+<!-- Google Calendar -->
+<a href="https://example.com/map.png">https://example.com/map.png</a>
+
+<!-- Rendu sur le site →-->
+<img src="https://example.com/map.png" alt="map.png" style="max-width:100%;height:auto;border-radius:6px;" />
+```
+
+### Mise en forme (Markdown ou HTML)
+
+- **Markdown** : Supporté natif (titres, listes, gras, liens…)
+- **HTML brut** : Passthrough direct (utile pour les listes complexes)
+- **Émojis** : Fonctionnent dans les titres et descriptions
+
+---
+
+## Déduplication & récurrences
+
+Le système gère intelligemment les événements récurrents via `RRULE` et les exceptions `RECURRENCE-ID` :
+
+- **Événements de base** (`RRULE`) : Gardés si non exclu par `EXDATE`
+- **Instances modifiées** (`RECURRENCE-ID`) : Toutes conservées avec IDs uniques
+- **Vrais doublons** (même UID, SEQUENCE différent) : Celui avec `SEQUENCE` max gardé
+- **Événements STATUS:CANCELLED** : Filtrés automatiquement
 
 ## Commandes
 
