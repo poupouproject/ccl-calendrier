@@ -85,18 +85,114 @@ export async function fetchAndParseSorties(icsUrl: string): Promise<Sortie[]> {
 
   const icsText = await response.text();
   const jcal = ICAL.parse(icsText);
+
   const comp = new ICAL.Component(jcal);
   const vevents = comp.getAllSubcomponents('vevent');
 
-  const sorties: Sortie[] = [];
+  // Passe 1 : catégoriser chaque VEVENT
+  // - rruleBaseVevents  : événement récurrent de base (a RRULE, pas de RECURRENCE-ID)
+  // - recurrenceInstances : instance modifiée d'une récurrence (a RECURRENCE-ID)
+  // - standaloneVevents  : événement ponctuel ordinaire
+  const rruleBaseVevents: ICAL.Component[] = [];
+  const recurrenceInstances: ICAL.Component[] = [];
+  const standaloneVevents: ICAL.Component[] = [];
+
+  // Ensemble « uid::timestampMs » pour détecter les DTSTART couverts par un RECURRENCE-ID
+  const recurrenceIdKeys = new Set<string>();
 
   for (const vevent of vevents) {
+    const uid = vevent.getFirstPropertyValue('uid') as string | null;
+    const hasRecurrenceId = Boolean(vevent.getFirstProperty('recurrence-id'));
+    const hasRrule = Boolean(vevent.getFirstProperty('rrule'));
+
+    if (hasRecurrenceId) {
+      recurrenceInstances.push(vevent);
+      if (uid) {
+        const ridTime = vevent.getFirstProperty('recurrence-id')!.getFirstValue() as ICAL.Time;
+        recurrenceIdKeys.add(`${uid}::${ridTime.toJSDate().getTime()}`);
+      }
+    } else if (hasRrule) {
+      rruleBaseVevents.push(vevent);
+    } else {
+      standaloneVevents.push(vevent);
+    }
+  }
+
+  // Passe 2 : éliminer les événements de base RRULE dont le DTSTART est
+  // exclu (EXDATE) ou remplacé par une instance RECURRENCE-ID.
+  // Google Calendar exporte chaque occurrence modifiée comme RECURRENCE-ID distinct
+  // et marque la première occurrence soit avec EXDATE soit avec un RECURRENCE-ID override.
+  const survivingRruleVevents: ICAL.Component[] = [];
+  for (const vevent of rruleBaseVevents) {
+    const uid = vevent.getFirstPropertyValue('uid') as string | null;
+    const dtstartProp = vevent.getFirstProperty('dtstart');
+    if (!dtstartProp) continue;
+    const dtstart = dtstartProp.getFirstValue() as ICAL.Time;
+    const dtstartMs = dtstart.toJSDate().getTime();
+
+    // Vérifier EXDATE
+    let isExdated = false;
+    for (const exProp of vevent.getAllProperties('exdate')) {
+      for (const val of (exProp.getValues() as ICAL.Time[])) {
+        if (val.toJSDate().getTime() === dtstartMs) {
+          isExdated = true;
+          break;
+        }
+      }
+      if (isExdated) break;
+    }
+
+    // Vérifier si une instance RECURRENCE-ID couvre déjà ce DTSTART
+    const isOverridden = uid ? recurrenceIdKeys.has(`${uid}::${dtstartMs}`) : false;
+
+    if (!isExdated && !isOverridden) {
+      survivingRruleVevents.push(vevent);
+    }
+  }
+
+  // Passe 3 : dédupliquer les événements ponctuels + base RRULE survivants par UID/SEQUENCE
+  // (gère le cas où Google Calendar conserve un VEVENT STATUS:CANCELLED)
+  const dedupMap = new Map<string, { vevent: ICAL.Component; sequence: number }>();
+  const noUidVevents: ICAL.Component[] = [];
+
+  for (const vevent of [...standaloneVevents, ...survivingRruleVevents]) {
+    const uid = vevent.getFirstPropertyValue('uid') as string | null;
+    if (!uid) {
+      noUidVevents.push(vevent);
+      continue;
+    }
+    const sequence = (vevent.getFirstPropertyValue('sequence') as number | null) ?? 0;
+    const existing = dedupMap.get(uid);
+    if (!existing || sequence > existing.sequence) {
+      dedupMap.set(uid, { vevent, sequence });
+    }
+  }
+
+  const sorties: Sortie[] = [];
+
+  const dedupedVevents = [
+    ...[...dedupMap.values()].map((e) => e.vevent),
+    ...recurrenceInstances,
+    ...noUidVevents,
+  ];
+
+  for (const vevent of dedupedVevents) {
+    // Ignorer les événements supprimés dans Google Calendar (STATUS:CANCELLED au niveau iCal)
+    const icalStatus = (vevent.getFirstPropertyValue('status') as string | null)?.toUpperCase();
+    if (icalStatus === 'CANCELLED') continue;
+
     const event = new ICAL.Event(vevent);
 
-    // Identifiant unique
+    // Identifiant unique par occurrence
+    // Pour les instances RECURRENCE-ID, on suffixe avec le timestamp de l'occurrence
+    // afin d'éviter les collisions d'ID HTML quand plusieurs instances partagent le même UID.
     const uid =
       (vevent.getFirstPropertyValue('uid') as string | null) ??
       crypto.randomUUID();
+    const recurrenceIdProp = vevent.getFirstProperty('recurrence-id');
+    const uniqueId = recurrenceIdProp
+      ? `${uid}_${(recurrenceIdProp.getFirstValue() as ICAL.Time).toJSDate().getTime()}`
+      : uid;
 
     // Titre
     const titreOriginal =
@@ -141,6 +237,9 @@ export async function fetchAndParseSorties(icsUrl: string): Promise<Sortie[]> {
     // Si la description contient déjà des balises HTML bloc, on l'utilise directement.
     // Sinon, on passe par marked (Markdown → HTML).
     const HTML_TAGS_RE = /<(p|div|br|ul|ol|li|b|i|strong|em|a|h[1-6]|span)\b/i;
+    // Remplace les liens pointant vers une image par un <img> :
+    // <a href="https://...image.png">...</a>  →  <img src="https://...image.png" alt="image.png" />
+    const IMAGE_LINK_RE = /<a\b[^>]*\bhref="(https?:\/\/[^"]+\.(?:png|jpe?g|gif|webp))"[^>]*>.*?<\/a>/gi;
     let descriptionHtml: string | null = null;
     if (descriptionRaw) {
       if (HTML_TAGS_RE.test(descriptionRaw)) {
@@ -148,10 +247,14 @@ export async function fetchAndParseSorties(icsUrl: string): Promise<Sortie[]> {
       } else {
         descriptionHtml = String(marked.parse(descriptionRaw));
       }
+      descriptionHtml = descriptionHtml!.replace(IMAGE_LINK_RE, (_, src: string) => {
+        const alt = src.split('/').pop() ?? 'image';
+        return `<img src="${src}" alt="${alt}" style="max-width:100%;height:auto;border-radius:6px;" />`;
+      });
     }
 
     sorties.push({
-      id: uid,
+      id: uniqueId,
       titre: titreNettoye,
       titreOriginal,
       groupe,
