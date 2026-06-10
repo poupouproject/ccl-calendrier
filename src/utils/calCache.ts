@@ -6,6 +6,18 @@ const FETCH_TIMEOUT_MS = 10_000;
 
 const ANNULE_REGEX = /^\[ANNULÉ(?:\s*[-–]\s*([^\]]+))?\]\s*/i;
 
+/**
+ * Génère un identifiant stable (non cryptographique) à partir d'une chaîne.
+ * Utilisé comme fallback quand un VEVENT n'a pas d'UID.
+ */
+function stableId(str: string): string {
+  let h = 0;
+  for (let i = 0; i < str.length; i++) {
+    h = (Math.imul(31, h) + str.charCodeAt(i)) | 0;
+  }
+  return `gen_${(h >>> 0).toString(16)}`;
+}
+
 function parseAnnulation(title: string): {
   isCancelled: boolean;
   cancelReason: string | null;
@@ -218,14 +230,19 @@ export async function fetchAndParseCalEvents(icsUrl: string): Promise<CalEvent[]
 
     const event = new ICAL.Event(vevent);
 
+    const titleOriginal = (vevent.getFirstPropertyValue('summary') as string | null) ?? '';
+    const startRaw = vevent.getFirstProperty('dtstart')?.getFirstValue() as ICAL.Time | undefined;
+    const startKey = startRaw ? String(startRaw.toJSDate().getTime()) : '0';
+
+    // Fallback déterministe si le VEVENT n'a pas d'UID : hash stable title+start
     const uid =
-      (vevent.getFirstPropertyValue('uid') as string | null) ?? crypto.randomUUID();
+      (vevent.getFirstPropertyValue('uid') as string | null) ??
+      stableId(`${titleOriginal}::${startKey}`);
     const recurrenceIdProp = vevent.getFirstProperty('recurrence-id');
     const uniqueUid = recurrenceIdProp
       ? `${uid}_${(recurrenceIdProp.getFirstValue() as ICAL.Time).toJSDate().getTime()}`
       : uid;
 
-    const titleOriginal = (vevent.getFirstPropertyValue('summary') as string | null) ?? '';
     const { isCancelled, cancelReason, cleanTitle } = parseAnnulation(titleOriginal);
 
     const location = (vevent.getFirstPropertyValue('location') as string | null) ?? '';

@@ -43,7 +43,9 @@ export const GET: APIRoute = async ({ request }) => {
   const url = new URL(request.url);
   const upcomingOnly = url.searchParams.get('upcoming') === 'true';
   const daysParam = url.searchParams.get('days');
-  const maxDays = daysParam ? parseInt(daysParam, 10) : null;
+  const maxDaysRaw = daysParam ? parseInt(daysParam, 10) : null;
+  // Valeurs négatives ou non-numériques sont ignorées
+  const maxDays = maxDaysRaw !== null && !isNaN(maxDaysRaw) && maxDaysRaw >= 0 ? maxDaysRaw : null;
   const groupFilter = url.searchParams.get('group');
 
   let events: CalEvent[] = [];
@@ -101,7 +103,7 @@ export const GET: APIRoute = async ({ request }) => {
     filtered = filtered.filter((e) => !e.isPast);
   }
 
-  if (maxDays !== null && !isNaN(maxDays)) {
+  if (maxDays !== null) {
     filtered = filtered.filter((e) => e.daysUntil >= 0 && e.daysUntil <= maxDays);
   }
 
