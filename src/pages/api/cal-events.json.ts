@@ -44,7 +44,7 @@ export const GET: APIRoute = async ({ request }) => {
   const maxDays = daysParam ? parseInt(daysParam, 10) : null;
   const groupFilter = url.searchParams.get('group');
 
-  let events: CalEvent[];
+  let events: CalEvent[] = [];
   let fromCache = false;
   let cachedAt: string | null = null;
 
@@ -93,7 +93,7 @@ export const GET: APIRoute = async ({ request }) => {
   }
 
   // --- Filtres via query params ---
-  let filtered = events!;
+  let filtered = events;
 
   if (upcomingOnly) {
     filtered = filtered.filter((e) => !e.isPast);

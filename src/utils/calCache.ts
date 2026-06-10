@@ -90,7 +90,8 @@ function formatTime(isoStr: string, isAllDay: boolean): string {
 /** Retire toutes les balises HTML et les caractères Markdown courants */
 function toPlainText(raw: string): string {
   return raw
-    .replace(/<[^>]+>/g, '')        // balises HTML
+    .replace(/<[^>]+>/g, '')        // balises HTML complètes
+    .replace(/</g, '')              // < résiduels (ex: tags malformés)
     .replace(/[*_~`#>[\]|]/g, '')   // Markdown courant
     .replace(/\n{3,}/g, '\n\n')     // espaces vides excessifs
     .trim();
@@ -157,8 +158,11 @@ export async function fetchAndParseCalEvents(icsUrl: string): Promise<CalEvent[]
     if (hasRecurrenceId) {
       recurrenceInstances.push(vevent);
       if (uid) {
-        const ridTime = vevent.getFirstProperty('recurrence-id')!.getFirstValue() as ICAL.Time;
-        recurrenceIdKeys.add(`${uid}::${ridTime.toJSDate().getTime()}`);
+        const recurrenceIdPropInner = vevent.getFirstProperty('recurrence-id');
+        if (recurrenceIdPropInner) {
+          const ridTime = recurrenceIdPropInner.getFirstValue() as ICAL.Time;
+          recurrenceIdKeys.add(`${uid}::${ridTime.toJSDate().getTime()}`);
+        }
       }
     } else if (hasRrule) {
       rruleBaseVevents.push(vevent);
