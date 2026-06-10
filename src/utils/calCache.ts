@@ -90,8 +90,8 @@ function formatTime(isoStr: string, isAllDay: boolean): string {
 /** Retire toutes les balises HTML et les caractères Markdown courants */
 function toPlainText(raw: string): string {
   return raw
-    .replace(/<[^>]*>?/g, '')       // tags HTML complets et < orphelins (sans >)
-    .replace(/[*_~`#>[\]|]/g, '')   // Markdown courant et > résiduels
+    .replace(/</g, '')              // supprimer tout < en premier (aucun tag ne peut subsister)
+    .replace(/[*_~`#>\[\]|]/g, '') // > résiduels et marqueurs Markdown
     .replace(/\n{3,}/g, '\n\n')     // espaces vides excessifs
     .trim();
 }

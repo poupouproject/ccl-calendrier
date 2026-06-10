@@ -1,4 +1,6 @@
 import type { APIRoute } from 'astro';
+// Note : @vercel/kv est déprécié par Vercel — migration future vers @upstash/redis directement.
+// Conservé ici conformément aux exigences du projet ; à migrer lors d'une prochaine itération.
 import { kv } from '@vercel/kv';
 import { fetchAndParseCalEvents } from '@/utils/calCache';
 import type { CalEvent, CalEventsResponse } from '@/types/calEvent';
